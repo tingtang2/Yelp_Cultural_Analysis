@@ -42,10 +42,12 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
                   double[:] rands):
     cdef int i, k, w, d, c, z, z_new, x, x_new
     cdef double r, dist_cum
+    cdef float p_0, p_1
     cdef int N = WS.shape[0]
     cdef int n_rand = rands.shape[0]
     cdef int n_topics = nz.shape[0]
     cdef double beta_sum = 0
+    cdef double delta_sum = 0
     cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
 
     if dist_sum is NULL:
@@ -77,22 +79,42 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
                 dec(nzwc[z, w, c])
                 dec(nzc[z, c])
 
+            p_0= (nx[0,c,z] + gamma0) * (nzw[z,w] + beta) / (nz[z] + beta_sum)
+
+            p_1= (nx[1,c,z] + gamma1) * (nzwc[z,w,c] + delta) / (nzc[z,c] + delta_sum)
 
             dist_cum = 0
-            for k in range(n_topics):
-                # beta is a double so cdivision yields a double
-                dist_cum += (nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k])
-                dist_sum[k] = dist_cum
 
-            r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
-            z_new = searchsorted(dist_sum, n_topics, r)
+            if x_new == 0:    
+                for k in range(n_topics):
+                    # beta is a double so cdivision yields a double
+                    dist_cum += (nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k])
+                    dist_sum[k] = dist_cum
+
+                r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
+                z_new = searchsorted(dist_sum, n_topics, r)
+            else:
+                for k in range(n_topics):
+                    # beta is a double so cdivision yields a double
+                    dist_cum += (nzwc[k, w, c] + beta[w]) / (nzc[k, c] + delta_sum) * (ndz[d, k] + alpha[k])
+                    dist_sum[k] = dist_cum
+
+                r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
+                z_new = searchsorted(dist_sum, n_topics, r)
+
 
             ZS[i] = z_new
             XS[i] = x_new
-            
-            inc(nzw[z_new, w])
+
+            if x_new == 0:
+                inc(nzw[z_new, w])
+                inc(nz[z_new])
+            else:
+                inc(nzwc[z_new, w, c])
+                inc(nzc[z_new, c])
+    
+            dec(nx[x, c, z_new])        
             inc(ndz[d, z_new])
-            inc(nz[z_new])
 
 
         free(dist_sum)
