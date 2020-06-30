@@ -31,7 +31,7 @@ class LDA:
     alpha : float, default 0.1
         Dirichlet parameter for distribution over topics
 
-    eta : float, default 0.01
+    beta : float, default 0.01
         Dirichlet parameter for distribution over words
 
     random_state : int or RandomState, optional
@@ -48,7 +48,7 @@ class LDA:
     `ndz_` : array, shape = [n_samples, n_topics]
         Matrix of counts recording document-topic assignments in final iteration.
     `doc_topic_` : array, shape = [n_samples, n_features]
-        Point estimate of the document-topic distributions (Theta in literature)
+        Point estimate of the document-topic distributions (Thbeta in literature)
     `nz_` : array, shape = [n_topics]
         Array of topic assignment counts in final iteration.
 
@@ -91,19 +91,22 @@ class LDA:
 
     """
 
-    def __init__(self, n_topics, n_iter=2000, alpha=0.1, eta=0.01, random_state=None,
+    def __init__(self, n_topics, n_iter=2000, alpha=0.1, beta=0.01, delta =.01,
+                gamma_0 = 1.0, gamma_1 = 1.0, random_state=None,
                  refresh=10):
         self.n_topics = n_topics
         self.n_iter = n_iter
         self.alpha = alpha
-        self.eta = eta
+        self.beta = beta
+        self.gamma_0 = gamma_0
+        self.gamma_1 = gamma_1
         # if random_state is None, check_random_state(None) does nothing
         # other than return the current numpy RandomState
         self.random_state = random_state
         self.refresh = refresh
 
-        if alpha <= 0 or eta <= 0:
-            raise ValueError("alpha and eta must be greater than zero")
+        if alpha <= 0 or beta <= 0:
+            raise ValueError("alpha and beta must be greater than zero")
 
         # random numbers that are reused
         rng = lda.utils.check_random_state(random_state)
@@ -113,7 +116,7 @@ class LDA:
         if len(logger.handlers) == 1 and isinstance(logger.handlers[0], logging.NullHandler):
             logging.basicConfig(level=logging.INFO)
 
-    def fit(self, X, y=None):
+    def fit(self, X, cc, y=None):
         """Fit the model with X.
 
         Parameters
@@ -121,13 +124,14 @@ class LDA:
         X: array-like, shape (n_samples, n_features)
             Training data, where n_samples in the number of samples
             and n_features is the number of features. Sparse matrix allowed.
+        cc: array of collections corresponding the ethnic cuisine type of each restaurant
 
         Returns
         -------
         self : object
             Returns the instance itself.
         """
-        self._fit(X)
+        self._fit(X, cc)
         return self
 
     def fit_transform(self, X, y=None):
@@ -175,7 +179,7 @@ class LDA:
         To calculate an approximation of the distribution over topics for each
         new document this function uses the "iterated pseudo-counts" approach
         described in Wallach, Murray, Salakhutdinov, and Mimno (2009) and
-        justified in greater detail in Buntine (2009). Specifically, we
+        justified in greater dbetail in Buntine (2009). Specifically, we
         implement the "simpler first order version" described in section 3.3 of
         Buntine (2009).
 
@@ -224,12 +228,12 @@ class LDA:
             PZS = PZS_new
             if delta_naive < tol:
                 break
-        theta_doc = PZS.sum(axis=0) / PZS.sum()
-        assert len(theta_doc) == self.n_topics
-        assert theta_doc.shape == (self.n_topics,)
-        return theta_doc
+        thbeta_doc = PZS.sum(axis=0) / PZS.sum()
+        assert len(thbeta_doc) == self.n_topics
+        assert thbeta_doc.shape == (self.n_topics,)
+        return thbeta_doc
 
-    def _fit(self, X):
+    def _fit(self, X, cc):
         """Fit the model to the data X
 
         Parameters
@@ -240,7 +244,7 @@ class LDA:
         """
         random_state = lda.utils.check_random_state(self.random_state)
         rands = self._rands.copy()
-        self._initialize(X)
+        self._initialize(X, cc)
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
@@ -253,7 +257,7 @@ class LDA:
         ll = self.loglikelihood()
         logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
         # note: numpy /= is integer division
-        self.components_ = (self.nzw_ + self.eta).astype(float)
+        self.components_ = (self.nzw_ + self.beta).astype(float)
         self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
         self.topic_word_ = self.components_
         self.doc_topic_ = (self.ndz_ + self.alpha).astype(float)
@@ -263,16 +267,19 @@ class LDA:
         del self.WS
         del self.DS
         del self.ZS
+        del self.XS
         return self
 
-    def _initialize(self, X):
-        D, W = X.shape
-        N = int(X.sum())
+    def _initialize(self, X, cc):
+        D, W = X.shape  # documents and vocab size
+        N = int(X.sum()) # number of total tokens
+        C = len(set(cc)) # number of collections
         n_topics = self.n_topics
         n_iter = self.n_iter
         logger.info("n_documents: {}".format(D))
         logger.info("vocab_size: {}".format(W))
         logger.info("n_words: {}".format(N))
+        logger.info("n_collections: {}".format(C))
         logger.info("n_topics: {}".format(n_topics))
         logger.info("n_iter: {}".format(n_iter))
 
@@ -280,16 +287,29 @@ class LDA:
         self.ndz_ = ndz_ = np.zeros((D, n_topics), dtype=np.intc)
         self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
 
+        self.nzwc_ = nzwc_ =  np.zeros((n_topics, W, C), dtype=np.intc) # phis for each collection
+        self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
+        self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # topic counts for each collection
+
         self.WS, self.DS = WS, DS = lda.utils.matrix_to_lists(X)
         self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc)
+        self.XS = XS = np.random.binomial(self.WS, .5, dtype=np.intc) # indicator for background
         np.testing.assert_equal(N, len(WS))
+
         for i in range(N):
-            w, d = WS[i], DS[i]
+            w, d, x = WS[i], DS[i], XS[i]
+            c = cc[d]
             z_new = i % n_topics
             ZS[i] = z_new
             ndz_[d, z_new] += 1
-            nzw_[z_new, w] += 1
-            nz_[z_new] += 1
+            nx_[x, c, z_new] += 1
+
+            if x is 0:
+                nzw_[z_new, w] += 1
+                nz_[z_new] += 1
+            else:
+                nzwc_[z_new, w, c] += 1
+                nzc_[z_new, c] += 1
         self.loglikelihoods_ = []
 
     def loglikelihood(self):
@@ -299,14 +319,16 @@ class LDA:
         """
         nzw, ndz, nz = self.nzw_, self.ndz_, self.nz_
         alpha = self.alpha
-        eta = self.eta
+        beta = self.beta
         nd = np.sum(ndz, axis=1).astype(np.intc)
-        return lda._lda._loglikelihood(nzw, ndz, nz, nd, alpha, eta)
+        return lda._lda._loglikelihood(nzw, ndz, nz, nd, alpha, beta)
 
     def _sample_topics(self, rands):
         """Samples all topic assignments. Called once per iteration."""
         n_topics, vocab_size = self.nzw_.shape
         alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
-        eta = np.repeat(self.eta, vocab_size).astype(np.float64)
-        lda._lda._sample_topics(self.WS, self.DS, self.ZS, self.nzw_, self.ndz_, self.nz_,
-                                alpha, eta, rands)
+        beta = np.repeat(self.beta, vocab_size).astype(np.float64)
+        delta = np.repeat(self.delta, vocab_size).astype(np.float64)
+
+        lda._lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS, self.nx_ self.nzw_, self.ndz_, self.nz_,
+                                self.nzwc_, self.nzc_, alpha, beta, delta, rands)

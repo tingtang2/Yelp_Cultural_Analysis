@@ -37,48 +37,68 @@ cdef int searchsorted(double* arr, int length, double value) nogil:
     return imin
 
 
-def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:, :] nzw, int[:, :] ndz, int[:] nz,
-                   double[:] alpha, double[:] eta, double[:] rands):
-    cdef int i, k, w, d, z, z_new
+def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:, :, :] nx,int[:, :] nzw,
+                  int[:, :] ndz, int[:] nz, int[:, :, :] nzwc, int[:, :] nzc, double[:] alpha, double[:] beta, double[:] delta,
+                  double[:] rands):
+    cdef int i, k, w, d, c, z, z_new, x, x_new
     cdef double r, dist_cum
     cdef int N = WS.shape[0]
     cdef int n_rand = rands.shape[0]
     cdef int n_topics = nz.shape[0]
-    cdef double eta_sum = 0
+    cdef double beta_sum = 0
     cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
+
     if dist_sum is NULL:
         raise MemoryError("Could not allocate memory during sampling.")
     with nogil:
-        for i in range(eta.shape[0]):
-            eta_sum += eta[i]
+
+        # first equation
+        for i in range(beta.shape[0]):
+            beta_sum += beta[i]
+
+        # second equation for when x = 1
+        for i in range(delta.shape[0]):
+            delta_sum += delta[i]
 
         for i in range(N):
             w = WS[i]
             d = DS[i]
             z = ZS[i]
+            c = CS[d]
+            x = XS[i]
 
-            dec(nzw[z, w])
+            dec(nx[x, c, z])
             dec(ndz[d, z])
-            dec(nz[z])
+
+            if x == 0:
+                dec(nzw[z, w])
+                dec(nz[z])
+            else:
+                dec(nzwc[z, w, c])
+                dec(nzc[z, c])
+
 
             dist_cum = 0
             for k in range(n_topics):
-                # eta is a double so cdivision yields a double
-                dist_cum += (nzw[k, w] + eta[w]) / (nz[k] + eta_sum) * (ndz[d, k] + alpha[k])
+                # beta is a double so cdivision yields a double
+                dist_cum += (nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k])
                 dist_sum[k] = dist_cum
 
             r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
             z_new = searchsorted(dist_sum, n_topics, r)
 
             ZS[i] = z_new
+            XS[i] = x_new
+            
             inc(nzw[z_new, w])
             inc(ndz[d, z_new])
             inc(nz[z_new])
 
+
         free(dist_sum)
 
 
-cpdef double _loglikelihood(int[:, :] nzw, int[:, :] ndz, int[:] nz, int[:] nd, double alpha, double eta) nogil:
+cpdef double _loglikelihood(int[:, :] nzw, int[:, :] ndz, int[:] nz, int[:] nd, double alpha, double beta) nogil:
     cdef int k, d
     cdef int D = ndz.shape[0]
     cdef int n_topics = ndz.shape[1]
@@ -87,18 +107,18 @@ cpdef double _loglikelihood(int[:, :] nzw, int[:, :] ndz, int[:] nz, int[:] nd, 
     cdef double ll = 0
 
     # calculate log p(w|z)
-    cdef double lgamma_eta, lgamma_alpha
+    cdef double lgamma_beta, lgamma_alpha
     with nogil:
-        lgamma_eta = lgamma(eta)
+        lgamma_beta = lgamma(beta)
         lgamma_alpha = lgamma(alpha)
 
-        ll += n_topics * lgamma(eta * vocab_size)
+        ll += n_topics * lgamma(beta * vocab_size)
         for k in range(n_topics):
-            ll -= lgamma(eta * vocab_size + nz[k])
+            ll -= lgamma(beta * vocab_size + nz[k])
             for w in range(vocab_size):
                 # if nzw[k, w] == 0 addition and subtraction cancel out
                 if nzw[k, w] > 0:
-                    ll += lgamma(eta + nzw[k, w]) - lgamma_eta
+                    ll += lgamma(beta + nzw[k, w]) - lgamma_beta
 
         # calculate log p(z)
         for d in range(D):
