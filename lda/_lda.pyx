@@ -6,6 +6,7 @@
 from cython.operator cimport preincrement as inc, predecrement as dec
 from libc.stdlib cimport malloc, free
 
+from libc.stdio cimport printf
 
 cdef extern from "gamma.h":
     cdef double lda_lgamma(double x) nogil
@@ -14,7 +15,7 @@ cdef extern from "gamma.h":
 cdef double lgamma(double x) nogil:
     if x <= 0:
         with gil:
-            raise ValueError("x must be strictly positive")
+            raise ValueError("x must be strictly positive: " + str(x))
     return lda_lgamma(x)
 
 
@@ -39,16 +40,18 @@ cdef int searchsorted(double* arr, int length, double value) nogil:
 
 def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:, :, :] nx,int[:, :] nzw,
                   int[:, :] ndz, int[:] nz, int[:, :, :] nzwc, int[:, :] nzc, double[:] alpha, double[:] beta, double[:] delta,
-                  double[:] rands):
+                  double gamma_0, double gamma_1, double[:] rands):
     cdef int i, k, w, d, c, z, z_new, x, x_new
-    cdef double r, dist_cum
-    cdef float p_0, p_1
+    cdef double r
     cdef int N = WS.shape[0]
     cdef int n_rand = rands.shape[0]
     cdef int n_topics = nz.shape[0]
+    cdef double dist_cum = 0
+    cdef double dist_cum_x = 0
     cdef double beta_sum = 0
     cdef double delta_sum = 0
     cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
+    cdef double* dist_sum_x = <double*> malloc(2 * sizeof(double))
 
     if dist_sum is NULL:
         raise MemoryError("Could not allocate memory during sampling.")
@@ -79,13 +82,25 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
                 dec(nzwc[z, w, c])
                 dec(nzc[z, c])
 
-            p_0= (nx[0,c,z] + gamma0) * (nzw[z,w] + beta) / (nz[z] + beta_sum)
+            dist_cum_x = (nx[0,c,z] + gamma_0) * (nzw[z,w] + beta[w]) / (nz[z] + beta_sum)
+            dist_sum_x[0] = dist_cum_x
 
-            p_1= (nx[1,c,z] + gamma1) * (nzwc[z,w,c] + delta) / (nzc[z,c] + delta_sum)
+            dist_cum_x += (nx[1,c,z] + gamma_1) * (nzwc[z,w,c] + delta[w]) / (nzc[z,c] + delta_sum)
+            dist_sum_x[1] = dist_cum_x
 
-            dist_cum = 0
 
-            if x_new == 0:    
+            r = rands[i % n_rand] * dist_cum_x
+
+            #x_new = searchsorted(dist_sum_x, 2, r)
+
+            if r < dist_sum_x[0]:
+                x_new = 0
+            else:
+                x_new = 1
+
+            printf("x_new %d\n", x_new)
+
+            if x_new == 0:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
                     dist_cum += (nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k])
@@ -96,15 +111,12 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
             else:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
-                    dist_cum += (nzwc[k, w, c] + beta[w]) / (nzc[k, c] + delta_sum) * (ndz[d, k] + alpha[k])
+                    dist_cum += (nzwc[k, w, c] + delta[w]) / (nzc[k, c] + delta_sum) * (ndz[d, k] + alpha[k])
                     dist_sum[k] = dist_cum
 
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
                 z_new = searchsorted(dist_sum, n_topics, r)
 
-
-            ZS[i] = z_new
-            XS[i] = x_new
 
             if x_new == 0:
                 inc(nzw[z_new, w])
@@ -112,12 +124,16 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
             else:
                 inc(nzwc[z_new, w, c])
                 inc(nzc[z_new, c])
-    
-            dec(nx[x, c, z_new])        
+
+            inc(nx[x, c, z_new])
             inc(ndz[d, z_new])
+
+            ZS[i] = z_new
+            XS[i] = x_new
 
 
         free(dist_sum)
+        free(dist_sum_x)
 
 
 cpdef double _loglikelihood(int[:, :] nzw, int[:, :] ndz, int[:] nz, int[:] nd, double alpha, double beta) nogil:
@@ -137,6 +153,13 @@ cpdef double _loglikelihood(int[:, :] nzw, int[:, :] ndz, int[:] nz, int[:] nd, 
         ll += n_topics * lgamma(beta * vocab_size)
         for k in range(n_topics):
             ll -= lgamma(beta * vocab_size + nz[k])
+
+            printf("nz[k]: \n")
+
+            printf("%d\n", nz[k])
+
+            ## DEBUG
+            #printf("%d\n", nz[k])
             for w in range(vocab_size):
                 # if nzw[k, w] == 0 addition and subtraction cancel out
                 if nzw[k, w] > 0:

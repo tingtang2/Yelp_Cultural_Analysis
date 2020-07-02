@@ -7,8 +7,8 @@ import sys
 
 import numpy as np
 
-import lda._lda
-import lda.utils
+import _lda
+import utils
 
 logger = logging.getLogger('lda')
 
@@ -16,6 +16,20 @@ PY2 = sys.version_info[0] == 2
 if PY2:
     range = xrange
 
+# Tester code
+
+X = np.array([[0, 1, 2, 3],
+              [2, 3, 1, 3],
+              [3, 4, 3, 5],
+              [4, 5, 4, 5]])
+cc = np.array([0 ,0 ,1, 1])
+
+#import importlib
+
+#moduleName = input('Enter module name:')
+#importlib.import_module(moduleName)
+
+#################################
 
 class LDA:
     """Latent Dirichlet allocation using collapsed Gibbs sampling
@@ -91,13 +105,14 @@ class LDA:
 
     """
 
-    def __init__(self, n_topics, n_iter=2000, alpha=0.1, beta=0.01, delta =.01,
+    def __init__(self, n_topics, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
                 gamma_0 = 1.0, gamma_1 = 1.0, random_state=None,
                  refresh=10):
         self.n_topics = n_topics
         self.n_iter = n_iter
         self.alpha = alpha
         self.beta = beta
+        self.delta= delta
         self.gamma_0 = gamma_0
         self.gamma_1 = gamma_1
         # if random_state is None, check_random_state(None) does nothing
@@ -109,7 +124,7 @@ class LDA:
             raise ValueError("alpha and beta must be greater than zero")
 
         # random numbers that are reused
-        rng = lda.utils.check_random_state(random_state)
+        rng = utils.check_random_state(random_state)
         self._rands = rng.rand(1024**2 // 8)  # 1MiB of random variates
 
         # configure console logging if not already configured
@@ -189,7 +204,7 @@ class LDA:
             # turn it into an array of shape (1, n_features)
             X = np.atleast_2d(X)
         doc_topic = np.empty((X.shape[0], self.n_topics))
-        WS, DS = lda.utils.matrix_to_lists(X)
+        WS, DS = utils.matrix_to_lists(X)
         # TODO: this loop is parallelizable
         for d in np.unique(DS):
             doc_topic[d] = self._transform_single(WS[DS == d], max_iter, tol)
@@ -242,7 +257,7 @@ class LDA:
             Training vector, where n_samples in the number of samples and
             n_features is the number of features. Sparse matrix allowed.
         """
-        random_state = lda.utils.check_random_state(self.random_state)
+        random_state = utils.check_random_state(self.random_state)
         rands = self._rands.copy()
         self._initialize(X, cc)
         for it in range(self.n_iter):
@@ -268,6 +283,7 @@ class LDA:
         del self.DS
         del self.ZS
         del self.XS
+        del self.CS
         return self
 
     def _initialize(self, X, cc):
@@ -291,9 +307,15 @@ class LDA:
         self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
         self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # topic counts for each collection
 
-        self.WS, self.DS = WS, DS = lda.utils.matrix_to_lists(X)
+        self.WS, self.DS = WS, DS = utils.matrix_to_lists(X)
+        self.CS = np.array(cc, dtype=np.intc)
         self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc)
-        self.XS = XS = np.random.binomial(self.WS, .5, dtype=np.intc) # indicator for background
+        self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
+        XS = XS.astype('intc')
+        self.XS = XS
+
+        #print(self.XS)
+        #print(self.XS.dtype)
         np.testing.assert_equal(N, len(WS))
 
         for i in range(N):
@@ -304,7 +326,7 @@ class LDA:
             ndz_[d, z_new] += 1
             nx_[x, c, z_new] += 1
 
-            if x is 0:
+            if x == 0:
                 nzw_[z_new, w] += 1
                 nz_[z_new] += 1
             else:
@@ -321,7 +343,7 @@ class LDA:
         alpha = self.alpha
         beta = self.beta
         nd = np.sum(ndz, axis=1).astype(np.intc)
-        return lda._lda._loglikelihood(nzw, ndz, nz, nd, alpha, beta)
+        return _lda._loglikelihood(nzw, ndz, nz, nd, alpha, beta)
 
     def _sample_topics(self, rands):
         """Samples all topic assignments. Called once per iteration."""
@@ -330,5 +352,5 @@ class LDA:
         beta = np.repeat(self.beta, vocab_size).astype(np.float64)
         delta = np.repeat(self.delta, vocab_size).astype(np.float64)
 
-        lda._lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS, self.nx_ self.nzw_, self.ndz_, self.nz_,
-                                self.nzwc_, self.nzc_, alpha, beta, delta, rands)
+        _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS, self.nx_, self.nzw_, self.ndz_, self.nz_,
+        self.nzwc_, self.nzc_, alpha, beta, delta, self.gamma_0, self.gamma_1, rands)
