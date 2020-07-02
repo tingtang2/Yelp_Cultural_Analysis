@@ -105,16 +105,18 @@ class LDA:
 
     """
 
-    def __init__(self, n_topics, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
-                gamma_0 = 1.0, gamma_1 = 1.0, random_state=None,
+    def __init__(self, n_topics, n_regions= 10, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
+                gamma_0 = 1.0, gamma_1 = 1.0, Gamma = .1, random_state=None,
                  refresh=10):
         self.n_topics = n_topics
+        self.n_regions = n_regions
         self.n_iter = n_iter
         self.alpha = alpha
         self.beta = beta
         self.delta= delta
         self.gamma_0 = gamma_0
         self.gamma_1 = gamma_1
+        self.Gamma = Gamma # parameter for Dirichlet prior for distribution of regions
         # if random_state is None, check_random_state(None) does nothing
         # other than return the current numpy RandomState
         self.random_state = random_state
@@ -131,7 +133,7 @@ class LDA:
         if len(logger.handlers) == 1 and isinstance(logger.handlers[0], logging.NullHandler):
             logging.basicConfig(level=logging.INFO)
 
-    def fit(self, X, cc, y=None):
+    def fit(self, X, cc, ps, ls y=None):
         """Fit the model with X.
 
         Parameters
@@ -146,7 +148,7 @@ class LDA:
         self : object
             Returns the instance itself.
         """
-        self._fit(X, cc)
+        self._fit(X, cc, ps, ls)
         return self
 
     def fit_transform(self, X, y=None):
@@ -284,6 +286,7 @@ class LDA:
         del self.ZS
         del self.XS
         del self.CS
+        del self.RS
         return self
 
     def _initialize(self, X, cc):
@@ -291,6 +294,7 @@ class LDA:
         N = int(X.sum()) # number of total tokens
         C = len(set(cc)) # number of collections
         n_topics = self.n_topics
+        n_regions = self.n_regions
         n_iter = self.n_iter
         logger.info("n_documents: {}".format(D))
         logger.info("vocab_size: {}".format(W))
@@ -299,13 +303,23 @@ class LDA:
         logger.info("n_topics: {}".format(n_topics))
         logger.info("n_iter: {}".format(n_iter))
 
+        # for background distribution
         self.nzw_ = nzw_ = np.zeros((n_topics, W), dtype=np.intc)
         self.ndz_ = ndz_ = np.zeros((D, n_topics), dtype=np.intc)
         self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
 
+        # for ethnic cuisines
         self.nzwc_ = nzwc_ =  np.zeros((n_topics, W, C), dtype=np.intc) # phis for each collection
         self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
-        self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # topic counts for each collection
+        self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # indicators for each collection for each topic
+
+        # for regions
+        self.RS = RS = np.random.multinomial(np.ones(self.WS.shape[0], dtype=np.intc), p=) # regions for each doc
+        RS = RS.astype('intc')
+        self.RS = RS
+        self.ndr_ = ndr_ = np.zeros((D, n_regions), dtype=np.intc) # sigmas for each doc
+        self.nr_ = nr_ = np.zeros(n_regions, dtype=np.intc)
+
 
         self.WS, self.DS = WS, DS = utils.matrix_to_lists(X)
         self.CS = np.array(cc, dtype=np.intc)
@@ -314,8 +328,6 @@ class LDA:
         XS = XS.astype('intc')
         self.XS = XS
 
-        #print(self.XS)
-        #print(self.XS.dtype)
         np.testing.assert_equal(N, len(WS))
 
         for i in range(N):
