@@ -24,11 +24,6 @@ X = np.array([[0, 1, 2, 3],
               [4, 5, 4, 5]])
 cc = np.array([0 ,0 ,1, 1])
 
-#import importlib
-
-#moduleName = input('Enter module name:')
-#importlib.import_module(moduleName)
-
 #################################
 
 class LDA:
@@ -133,7 +128,7 @@ class LDA:
         if len(logger.handlers) == 1 and isinstance(logger.handlers[0], logging.NullHandler):
             logging.basicConfig(level=logging.INFO)
 
-    def fit(self, X, cc, ps, ls y=None):
+    def fit(self, X, cc, ps, ls, y=None):
         """Fit the model with X.
 
         Parameters
@@ -250,7 +245,7 @@ class LDA:
         assert thbeta_doc.shape == (self.n_topics,)
         return thbeta_doc
 
-    def _fit(self, X, cc):
+    def _fit(self, X, cc, ps, ls):
         """Fit the model to the data X
 
         Parameters
@@ -261,7 +256,7 @@ class LDA:
         """
         random_state = utils.check_random_state(self.random_state)
         rands = self._rands.copy()
-        self._initialize(X, cc)
+        self._initialize(X, cc, ps, ls)
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
@@ -289,7 +284,7 @@ class LDA:
         del self.RS
         return self
 
-    def _initialize(self, X, cc):
+    def _initialize(self, X, cc, ps, ls):
         D, W = X.shape  # documents and vocab size
         N = int(X.sum()) # number of total tokens
         C = len(set(cc)) # number of collections
@@ -327,12 +322,15 @@ class LDA:
         self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
         XS = XS.astype('intc')
         self.XS = XS
+        self.PS = PS = np.array(ps)
+        self.LS = LS = np.array(ls, dtype=(np.single, np.single))
 
         np.testing.assert_equal(N, len(WS))
 
         for i in range(N):
             w, d, x = WS[i], DS[i], XS[i]
             c = cc[d]
+
             z_new = i % n_topics
             ZS[i] = z_new
             ndz_[d, z_new] += 1
