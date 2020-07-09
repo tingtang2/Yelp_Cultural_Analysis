@@ -22,7 +22,9 @@ X = np.array([[0, 1, 2, 3],
               [2, 3, 1, 3],
               [3, 4, 3, 5],
               [4, 5, 4, 5]])
-cc = np.array([0 ,0 ,1, 1])
+cc = np.array([0 ,0 ,1, 1], dtype=np.intc)
+ps = np.array([0 ,0 ,1, 1])
+ls = np.array([(5.3, 2.3), (1.9, 4.5), (2.4, 2.4), (2.6, 7.3)])
 
 #################################
 
@@ -100,8 +102,9 @@ class LDA:
 
     """
 
-    def __init__(self, n_topics, n_regions= 10, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
-                gamma_0 = 1.0, gamma_1 = 1.0, Gamma = .1, random_state=None,
+    def __init__(self, n_topics, n_regions= 2, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
+                gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, mu_0 = np.array([.5, .5], dtype=np.double),
+                S_0 = np.array([[1, 0], [0, 1]], dtype=np.double), lambda_0 = 3.0, v_0 =3.0, random_state=None,
                  refresh=10):
         self.n_topics = n_topics
         self.n_regions = n_regions
@@ -111,7 +114,13 @@ class LDA:
         self.delta= delta
         self.gamma_0 = gamma_0
         self.gamma_1 = gamma_1
-        self.Gamma = Gamma # parameter for Dirichlet prior for distribution of regions
+        self.Delta = Delta # parameter for Dirichlet prior for distribution of regions
+        self.mu_0 = mu_0
+        self.S_0 = S_0
+        self.lambda_0 = lambda_0
+        self.v_0 = v_0
+
+
         # if random_state is None, check_random_state(None) does nothing
         # other than return the current numpy RandomState
         self.random_state = random_state
@@ -260,14 +269,16 @@ class LDA:
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
+            '''
             if it % self.refresh == 0:
                 ll = self.loglikelihood()
                 logger.info("<{}> log likelihood: {:.0f}".format(it, ll))
                 # keep track of loglikelihoods for monitoring convergence
                 self.loglikelihoods_.append(ll)
+            '''
             self._sample_topics(rands)
-        ll = self.loglikelihood()
-        logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
+        #ll = self.loglikelihood()
+        #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
         # note: numpy /= is integer division
         self.components_ = (self.nzw_ + self.beta).astype(float)
         self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
@@ -288,6 +299,7 @@ class LDA:
         D, W = X.shape  # documents and vocab size
         N = int(X.sum()) # number of total tokens
         C = len(set(cc)) # number of collections
+        P = 3 # three price categories
         n_topics = self.n_topics
         n_regions = self.n_regions
         n_iter = self.n_iter
@@ -303,36 +315,50 @@ class LDA:
         self.ndz_ = ndz_ = np.zeros((D, n_topics), dtype=np.intc)
         self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
 
-        # for ethnic cuisines
-        self.nzwc_ = nzwc_ =  np.zeros((n_topics, W, C), dtype=np.intc) # phis for each collection
-        self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
-        self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # indicators for each collection for each topic
+        # for ethnic cuisines x region distributions
+        self.nzwcr_ = nzwcr_ =  np.zeros((n_topics, W, C, n_regions), dtype=np.intc) # phis for each collection
+        self.nzcr_ = nzcr_ = np.zeros((n_topics, C, n_regions), dtype=np.intc) # topic counts for each collection
+        self.nx_ = nx_ = np.zeros((2, C, n_regions, n_topics), dtype=np.intc) # indicators for each collection for each topic
 
-        # for regions
-        self.RS = RS = np.random.multinomial(np.ones(self.WS.shape[0], dtype=np.intc), p=) # regions for each doc
-        RS = RS.astype('intc')
-        self.RS = RS
+
         self.ndr_ = ndr_ = np.zeros((D, n_regions), dtype=np.intc) # sigmas for each doc
         self.nr_ = nr_ = np.zeros(n_regions, dtype=np.intc)
+        #self.nrl_ = nrl_ = np.zeros((n_regions, D), dtype=np.single) # regions by location
 
 
         self.WS, self.DS = WS, DS = utils.matrix_to_lists(X)
-        self.CS = np.array(cc, dtype=np.intc)
+        # for regions
+        self.CS = CS = cc
+        self.RS = RS = np.empty_like(self.CS, dtype=np.intc) # regions for each doc
         self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc)
-        self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
+
+        # TO DO: check if initializing xs as zeros or random is better
+        #self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
+        self.XS = XS = np.zeros(self.WS.shape[0], dtype=np.intc) # indicator for background
         XS = XS.astype('intc')
         self.XS = XS
-        self.PS = PS = np.array(ps)
-        self.LS = LS = np.array(ls, dtype=(np.single, np.single))
+
+        self.PS = PS = ps
+        self.LS = LS = ls
 
         np.testing.assert_equal(N, len(WS))
 
+        for i in range(D):
+            r_new = i % n_regions
+            RS[i] = r_new
+
+            ndr_[i, r_new] += 1
+            nr_[r_new] += 1
+
         for i in range(N):
             w, d, x = WS[i], DS[i], XS[i]
-            c = cc[d]
+            c = CS[d]
+            p = PS[d]
 
             z_new = i % n_topics
             ZS[i] = z_new
+
+
             ndz_[d, z_new] += 1
             nx_[x, c, z_new] += 1
 
@@ -340,7 +366,7 @@ class LDA:
                 nzw_[z_new, w] += 1
                 nz_[z_new] += 1
             else:
-                nzwc_[z_new, w, c] += 1
+                nzwcr_[z_new, w, c, r_new] += 1
                 nzc_[z_new, c] += 1
         self.loglikelihoods_ = []
 
@@ -361,6 +387,9 @@ class LDA:
         alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
         beta = np.repeat(self.beta, vocab_size).astype(np.float64)
         delta = np.repeat(self.delta, vocab_size).astype(np.float64)
+        Delta = np.repeat(self.Delta, self.n_regions).astype(np.float64)
 
-        _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS, self.nx_, self.nzw_, self.ndz_, self.nz_,
-        self.nzwc_, self.nzc_, alpha, beta, delta, self.gamma_0, self.gamma_1, rands)
+        _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS, self.RS, self.LS,
+         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwcr_, self.nzcr_, self.ndr_,
+         self.nr_, Delta, alpha, beta, delta, self.gamma_0, self.gamma_1, rands, self.lambda_0,
+         self.S_0, self.mu_0, self.v_0)
