@@ -65,10 +65,12 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
     cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
     cdef double* dist_sum_x = <double*> malloc(2 * sizeof(double))
 
+
     C = np.zeros((2, 2), dtype=np.double)
 
     if dist_sum is NULL:
         raise MemoryError("Could not allocate memory during sampling.")
+
 
     y_bar = np.mean(LS)
 
@@ -78,20 +80,19 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
         inv_RS[RS[i]].append(i)
 
 
-    print("\n" + str(inv_RS))
+    #print("\n" + str(inv_RS))
 
     # gibbs sampling for regions
     for d in range(len(RS)):
-        print("d", d)
+        #print("d", d)
         rr = RS[d]
 
-
-        dec(ndr[d, rr])
+        ndr[d, rr] -= 1
 
         dist_sum_r = np.zeros(n_regions)
 
         for reg in range(n_regions):
-            print("reg", reg)
+            #print("reg", reg)
             N_ = nr[reg]
 
             Is = inv_RS[reg]
@@ -100,46 +101,50 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
             # find constant C
             for i in Is:
                 L = np.array(LS[i], dtype=(np.double, np.double))
-                print(L)
+                #print(L)
                 #print(((L - y_bar).T).dot((L - y_bar)))
                 C += ((L - y_bar).T).dot((L - y_bar))
 
-            print("C", C)
+            #print("C", C)
 
             S_N = np.array(S_0) + np.array(C) + (lambda_0 * N_/(lambda_0+ N_)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
             S_N1 = np.array(S_0) + np.array(C) + (lambda_0 * N/(lambda_0+ N_-1)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
 
             prob = pow(M_PI, -2/2)*pow((lambda_0+N)/(lambda_0+N_-1), -2/2)*pow(np.linalg.det(S_N), -(v_0+N_)/2)/pow(np.linalg.det(S_N1), -(v_0+N_-1)/2)*exp(lgamma((v_0 + N_)/2))/exp(lgamma((v_0 + N_ -2)/2))
 
-            print("computed prob")
+            #print("computed prob")
 
             dist_cum_r += (ndr[d, reg] + Delta[reg]) * prob
             dist_sum_r[reg] = dist_cum_r
 
 
-            r = rands[d % n_rand] * dist_cum_r
+        #r = rands[d % n_rand] * dist_cum_r
 
-            rr_new = np.searchsorted(dist_sum_r, r, side='right')
+        #print("index for rand, d:", d % n_rand)
 
-            print(rr_new)
+        rr_new = np.searchsorted(dist_sum_r, np.random.rand() * dist_cum_r, side='left')
+        #rr_new = np.searchsorted(dist_sum_r, r, side='right')
+        #rr_new = searchsorted(dist_sum, n_regions, np.random.rand() * dist_cum_r)
+        #printf("z_new %d\n", z_new)
 
-            if rr_new == n_regions:
-                rr_new = rr_new -1
-                print("oh no")
+        print("rr_new", rr_new)
 
+        if rr_new == -1:
+            rr_new = rr_new +1
+            print("oh no")
 
-
-        inc(ndr[d, rr_new])
-
-        print("here")
+        #inc(ndr[d, rr_new])
+        ndr[d, rr_new] += 1
+        print("increment count")
+        RS[d] = rr_new
+        print("assign")
 
     #free(dist_sum_r)
-
-    print("here1")
 
     with nogil:
 
         # first equation
+        printf("here1 \n")
         for i in range(beta.shape[0]):
             beta_sum += beta[i]
 
@@ -147,8 +152,6 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
         for i in range(delta.shape[0]):
             delta_sum += delta[i]
 
-
-        printf("here2")
         # gibbs sampling for topics and indicator variables
         for i in range(N):
             w = WS[i]
@@ -177,6 +180,8 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
 
             r = rands[i % n_rand] * dist_cum_x
 
+            #printf("%d\nindex for rand, i:", i % n_rand)
+
             #x_new = searchsorted(dist_sum_x, 2, r)
 
             if r < dist_sum_x[0]:
@@ -201,6 +206,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
 
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
                 z_new = searchsorted(dist_sum, n_topics, r)
+                #printf("z_new %d\n", z_new)
 
 
             if x_new == 0:
@@ -240,9 +246,8 @@ cpdef double _loglikelihood(int[:, :] nzw, int[:, :] ndz, int[:] nz, int[:] nd, 
         for k in range(n_topics):
             ll -= lgamma(beta * vocab_size + nz[k])
 
-
             ## DEBUG
-            printf("%d\n", nz[k])
+            #printf("%d\n", nz[k])
             for w in range(vocab_size):
                 # if nzw[k, w] == 0 addition and subtraction cancel out
                 if nzw[k, w] > 0:

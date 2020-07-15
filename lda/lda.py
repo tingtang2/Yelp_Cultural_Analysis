@@ -102,7 +102,7 @@ class LDA:
 
     """
 
-    def __init__(self, n_topics, n_regions= 2, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
+    def __init__(self, n_topics, n_regions= 4, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
                 gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, mu_0 = np.array([.5, .5], dtype=np.double),
                 S_0 = np.array([[1, 0], [0, 1]], dtype=np.double), lambda_0 = 3.0, v_0 =3.0, random_state=None,
                  refresh=10):
@@ -277,6 +277,8 @@ class LDA:
                 self.loglikelihoods_.append(ll)
             '''
             self._sample_topics(rands)
+            if it % self.refresh == 0:
+                print(str(it) + "/" + str(self.n_iter))
         #ll = self.loglikelihood()
         #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
         # note: numpy /= is integer division
