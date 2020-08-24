@@ -288,6 +288,7 @@ class LDA:
         return thbeta_doc
 
     def _fit_complete(self, X, cc, ls):
+        """
         Fit the model to the data X
 
         Parameters
@@ -295,10 +296,11 @@ class LDA:
         X: array-like, shape (n_samples, n_features)
             Training vector, where n_samples in the number of samples and
             n_features is the number of features. Sparse matrix allowed.
+        """
 
         random_state = utils.check_random_state(self.random_state)
         rands = self._rands.copy()
-        self._initialize(X, cc, ls)
+        self._initialize_complete(X, cc, ls)
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
@@ -423,19 +425,19 @@ class LDA:
 
         return self
 
-    def _initialize(self, X, cc, ls):
+    def _initialize_complete(self, X, cc, ls):
         D, W = X.shape  # documents and vocab size
         N = int(X.sum()) # number of total tokens
         C = len(set(cc)) # number of collections
         n_topics = self.n_topics
         n_regions = self.n_regions
         n_iter = self.n_iter
-        logger.info("n_documents: {}".format(D))
-        logger.info("vocab_size: {}".format(W))
-        logger.info("n_words: {}".format(N))
-        logger.info("n_collections: {}".format(C))
-        logger.info("n_topics: {}".format(n_topics))
-        logger.info("n_iter: {}".format(n_iter))
+        #logger.info("n_documents: {}".format(D))
+        #logger.info("vocab_size: {}".format(W))
+        #logger.info("n_words: {}".format(N))
+        #logger.info("n_collections: {}".format(C))
+        #logger.info("n_topics: {}".format(n_topics))
+        #logger.info("n_iter: {}".format(n_iter))
 
         # for background distribution
         self.nzw_ = nzw_ = np.zeros((n_topics, W), dtype=np.intc)
@@ -443,9 +445,13 @@ class LDA:
         self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
 
         # for ethnic cuisines x region distributions
-        self.nzwcr_ = nzwcr_ =  np.zeros((n_topics, W, C, n_regions), dtype=np.intc) # phis for each collection
-        self.nzcr_ = nzcr_ = np.zeros((n_topics, C, n_regions), dtype=np.intc) # topic counts for each collection
-        self.nx_ = nx_ = np.zeros((2, C, n_regions, n_topics), dtype=np.intc) # indicators for each collection for each topic
+        self.nzwc_ = nzwc_ =  np.zeros((n_topics, W, C), dtype=np.intc) # phis for each collection
+        self.nzwr_ = nzwr_ =  np.zeros((n_topics, W, n_regions), dtype=np.intc) # phis for each region
+        self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
+        self.nzr_ = nzr_ = np.zeros((n_topics, n_regions), dtype=np.intc) # topic counts for each collection
+
+        self.nxc_ = nxc_ = np.zeros((2, C, n_topics), dtype=np.intc) # indicators for each collection for each topic
+        self.nxr_ = nxr_ = np.zeros((2, n_regions, n_topics), dtype=np.intc) # indicators for each region for each topic
 
 
         self.ndr_ = ndr_ = np.zeros((D, n_regions), dtype=np.intc) # sigmas for each doc
@@ -498,6 +504,8 @@ class LDA:
         print("Finished initializing")
         self.loglikelihoods_ = []
 
+
+    # just for ethnicities
     def _initialize(self, X, cc):
         D, W = X.shape  # documents and vocab size
         N = int(X.sum()) # number of total tokens
