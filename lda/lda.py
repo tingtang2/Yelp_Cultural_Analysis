@@ -16,16 +16,6 @@ PY2 = sys.version_info[0] == 2
 if PY2:
     range = xrange
 
-# Tester code
-
-X = np.array([[0, 1, 2, 3],
-              [2, 3, 1, 3],
-              [3, 4, 3, 5],
-              [4, 5, 4, 5]])
-cc = np.array([0 ,0 ,1, 1], dtype=np.intc)
-ps = np.array([0 ,0 ,1, 1])
-ls = np.array([(5.3, 2.3), (1.9, 4.5), (2.4, 2.4), (2.6, 7.3)])
-
 #################################
 
 class LDA:
@@ -101,25 +91,29 @@ class LDA:
     doi:10.1007/978-3-642-05224-8_6.
 
     """
-
-    def __init__(self, n_topics, n_regions= 4, n_iter=1000, alpha=0.1, beta=0.01, delta =.01,
-                gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, mu_0 = np.array([.5, .5], dtype=np.double),
-                S_0 = np.array([[1, 0], [0, 1]], dtype=np.double), lambda_0 = 3.0, v_0 =3.0, random_state=None,
-                 refresh=10):
+    def __init__(self, n_topics, n_regions= 10, n_iter=1000, alpha=0.1, beta=0.01, delta =.01, gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, mu_0 = np.array([44, -103], dtype=np.double), S_0 = np.array([[1, 0], [0, 1]], dtype=np.double), lambda_0 = 1, v_0 =3, random_state=None, refresh=10):
         self.n_topics = n_topics
         self.n_regions = n_regions
         self.n_iter = n_iter
-        self.alpha = alpha
-        self.beta = beta
+
+        '''def __init__(self, n_topics, n_iter=1000, alpha=0.1, beta=0.01, delta =.01, gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, random_state=None, refresh=10):'''
+
+        # params for basic LDA
+        self.alpha = alpha        # param for Dirichlet prior for topic mixture
+        self.beta = beta          # param for Dirichlet prior for dist of words for each topic
         self.delta= delta
-        self.gamma_0 = gamma_0
-        self.gamma_1 = gamma_1
-        self.Delta = Delta # parameter for Dirichlet prior for distribution of regions
+
+        # params for ethnic cuisines
+        self.gamma_0 = gamma_0    # first param for Beta prior for indicator
+        self.gamma_1 = gamma_1    # second param for Beta prior for indicator
+
+        self.Delta = Delta        # param for Dirichlet prior for dist of regions
+
+        # params for location (Normal-Wishart conjugate prior)
         self.mu_0 = mu_0
         self.S_0 = S_0
         self.lambda_0 = lambda_0
         self.v_0 = v_0
-
 
         # if random_state is None, check_random_state(None) does nothing
         # other than return the current numpy RandomState
@@ -137,7 +131,28 @@ class LDA:
         if len(logger.handlers) == 1 and isinstance(logger.handlers[0], logging.NullHandler):
             logging.basicConfig(level=logging.INFO)
 
-    def fit(self, X, cc, ps, ls, y=None):
+
+    def fit_complete(self, X, cc, ls, y=None):
+        Fit the model with X.
+
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training data, where n_samples in the number of samples
+            and n_features is the number of features. Sparse matrix allowed.
+        cc: array of collections corresponding the ethnic cuisine type of each restaurant
+        ls: array of locations coordinates for each review
+
+        Returns
+        -------
+        self : object
+            Returns the instance itself.
+
+        self._fit_complete(X, cc, ls)
+        return self
+
+
+    def fit(self, X, cc, y=None):
         """Fit the model with X.
 
         Parameters
@@ -152,7 +167,25 @@ class LDA:
         self : object
             Returns the instance itself.
         """
-        self._fit(X, cc, ps, ls)
+        self._fit(X, cc)
+        return self
+
+    def fitLs(self, ls):
+        """Fit the model with X.
+
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training data, where n_samples in the number of samples
+            and n_features is the number of features. Sparse matrix allowed.
+        ls: array of locations
+
+        Returns
+        -------
+        self : object
+            Returns the instance itself.
+        """
+        self._fitLs(ls)
         return self
 
     def fit_transform(self, X, y=None):
@@ -254,18 +287,18 @@ class LDA:
         assert thbeta_doc.shape == (self.n_topics,)
         return thbeta_doc
 
-    def _fit(self, X, cc, ps, ls):
-        """Fit the model to the data X
+    def _fit_complete(self, X, cc, ls):
+        Fit the model to the data X
 
         Parameters
         ----------
         X: array-like, shape (n_samples, n_features)
             Training vector, where n_samples in the number of samples and
             n_features is the number of features. Sparse matrix allowed.
-        """
+
         random_state = utils.check_random_state(self.random_state)
         rands = self._rands.copy()
-        self._initialize(X, cc, ps, ls)
+        self._initialize(X, cc, ls)
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
@@ -276,9 +309,11 @@ class LDA:
                 # keep track of loglikelihoods for monitoring convergence
                 self.loglikelihoods_.append(ll)
             '''
-            self._sample_topics(rands)
+            self._sample_topics_complete(rands)
             if it % self.refresh == 0:
                 print(str(it) + "/" + str(self.n_iter))
+
+
         #ll = self.loglikelihood()
         #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
         # note: numpy /= is integer division
@@ -295,13 +330,103 @@ class LDA:
         del self.XS
         del self.CS
         del self.RS
+
         return self
 
-    def _initialize(self, X, cc, ps, ls):
+
+
+    def _fit(self, X, cc):
+        """Fit the model to the data X
+
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training vector, where n_samples in the number of samples and
+            n_features is the number of features. Sparse matrix allowed.
+        """
+        random_state = utils.check_random_state(self.random_state)
+        rands = self._rands.copy()
+        self._initialize(X, cc)
+        for it in range(self.n_iter):
+            # FIXME: using numpy.roll with a random shift might be faster
+            random_state.shuffle(rands)
+            '''
+            if it % self.refresh == 0:
+                ll = self.loglikelihood()
+                logger.info("<{}> log likelihood: {:.0f}".format(it, ll))
+                # keep track of loglikelihoods for monitoring convergence
+                self.loglikelihoods_.append(ll)
+            '''
+            self._sample_topics(rands)
+            if it % self.refresh == 0:
+                print(str(it) + "/" + str(self.n_iter))
+
+
+        #ll = self.loglikelihood()
+        #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
+        # note: numpy /= is integer division
+        self.components_ = (self.nzw_ + self.beta).astype(float)
+        self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
+        self.topic_word_ = self.components_
+
+        self.doc_topic_ = (self.ndz_ + self.alpha).astype(float)
+        self.doc_topic_ /= np.sum(self.doc_topic_, axis=1)[:, np.newaxis]
+
+        # word distributions for individual collections
+        self.topic_word_collection_ = (self.nzwc_ + self.delta).astype(float)
+        self.topic_word_collection_ /= np.sum(self.topic_word_collection_, axis=1)[:, np.newaxis, :]
+
+
+        # delete attributes no longer needed after fitting to save memory and reduce clutter
+        del self.WS
+        del self.DS
+        del self.ZS
+        del self.XS
+        del self.CS
+
+        return self
+
+    def _fitLs(self, Ls):
+        """Fit the model to the data X
+
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training vector, where n_samples in the number of samples and
+            n_features is the number of features. Sparse matrix allowed.
+        """
+        random_state = utils.check_random_state(self.random_state)
+        rands = self._rands.copy()
+        self._initializeLs(Ls)
+        for it in range(self.n_iter):
+            # FIXME: using numpy.roll with a random shift might be faster
+            random_state.shuffle(rands)
+            '''
+            if it % self.refresh == 0:
+                ll = self.loglikelihood()
+                logger.info("<{}> log likelihood: {:.0f}".format(it, ll))
+                # keep track of loglikelihoods for monitoring convergence
+                self.loglikelihoods_.append(ll)
+            '''
+            self._sample_Ls(rands)
+            if it % self.refresh == 0:
+                print(str(it) + "/" + str(self.n_iter))
+
+
+        #ll = self.loglikelihood()
+        #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
+        # note: numpy /= is integer division
+
+        # delete attributes no longer needed after fitting to save memory and reduce clutter
+        del self.LS
+        del self.RS
+
+        return self
+
+    def _initialize(self, X, cc, ls):
         D, W = X.shape  # documents and vocab size
         N = int(X.sum()) # number of total tokens
         C = len(set(cc)) # number of collections
-        P = 3 # three price categories
         n_topics = self.n_topics
         n_regions = self.n_regions
         n_iter = self.n_iter
@@ -340,7 +465,6 @@ class LDA:
         XS = XS.astype('intc')
         self.XS = XS
 
-        self.PS = PS = ps
         self.LS = LS = ls
 
         np.testing.assert_equal(N, len(WS))
@@ -355,11 +479,72 @@ class LDA:
         for i in range(N):
             w, d, x = WS[i], DS[i], XS[i]
             c = CS[d]
-            p = PS[d]
+            rr = RS[d]
 
             z_new = i % n_topics
             ZS[i] = z_new
 
+
+            ndz_[d, z_new] += 1
+            nx_[x, c,rr, z_new] += 1
+
+            if x == 0:
+                nzw_[z_new, w] += 1
+                nz_[z_new] += 1
+            else:
+                nzwcr_[z_new, w, c, r_new] += 1
+                nzc_[z_new, c] += 1
+
+        print("Finished initializing")
+        self.loglikelihoods_ = []
+
+    def _initialize(self, X, cc):
+        D, W = X.shape  # documents and vocab size
+        N = int(X.sum()) # number of total tokens
+        C = len(set(cc)) # number of collections
+        n_topics = self.n_topics
+        #n_regions = self.n_regions
+        n_iter = self.n_iter
+
+        logger.info("n_documents: {}".format(D))
+        logger.info("vocab_size: {}".format(W))
+        logger.info("n_words: {}".format(N))
+        logger.info("n_collections: {}".format(C))
+        logger.info("n_topics: {}".format(n_topics))
+        logger.info("n_iter: {}".format(n_iter))
+
+        # for background distribution (normal LDA)
+        self.nzw_ = nzw_ = np.zeros((n_topics, W), dtype=np.intc)
+        self.ndz_ = ndz_ = np.zeros((D, n_topics), dtype=np.intc)
+        self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
+
+        # for ethnic cuisines distributions
+        self.nzwc_ = nzwc_ =  np.zeros((n_topics, W, C), dtype=np.intc) # phis for each collection
+        self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
+        self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # indicators for each collection for each topic
+
+
+        self.WS, self.DS = WS, DS = utils.matrix_to_lists(X) # word and document indices
+        self.CS = CS = cc # ethnic cuisine for each review
+
+        self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc) # topics for each word
+
+        # TO DO: check if initializing xs as zeros or random is better
+        self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
+        #self.XS = XS = np.zeros(self.WS.shape[0], dtype=np.intc) # indicator for background
+        XS = XS.astype('intc')
+        self.XS = XS
+
+        np.testing.assert_equal(N, len(WS))
+        np.testing.assert_equal(len(set(DS)), len(CS))
+
+
+        for i in range(N):
+            w, d, x = WS[i], DS[i], XS[i]
+            c = CS[d]
+
+            z_new = i % n_topics
+            ZS[i] = z_new
 
             ndz_[d, z_new] += 1
             nx_[x, c, z_new] += 1
@@ -368,9 +553,42 @@ class LDA:
                 nzw_[z_new, w] += 1
                 nz_[z_new] += 1
             else:
-                nzwcr_[z_new, w, c, r_new] += 1
+                nzwc_[z_new, w, c] += 1
                 nzc_[z_new, c] += 1
+
+        print("Finished initializing")
         self.loglikelihoods_ = []
+
+    def _initializeLs(self, ls):
+            n_topics = self.n_topics
+            n_regions = self.n_regions
+            n_iter = self.n_iter
+
+            self.D = D = len(ls)
+
+            self.ndr_ = ndr_ = np.zeros((D, n_regions), dtype=np.intc) # sigmas for each doc
+            self.nr_ = nr_ = np.zeros(n_regions, dtype=np.intc)
+            #self.nrl_ = nrl_ = np.zeros((n_regions, D), dtype=np.single) # regions by location
+
+
+            self.RS = RS = np.zeros(D, dtype=np.intc)# regions for each doc
+
+            # TO DO: check if initializing xs as zeros or random is better
+            #self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
+            self.LS = LS = ls
+
+
+            for i in range(len(ls)):
+                r_new = i % n_regions
+                RS[i] = r_new
+
+                ndr_[i, r_new] += 1
+                nr_[r_new] += 1
+
+
+            print("Finished initializing")
+            self.loglikelihoods_ = []
+
 
     def loglikelihood(self):
         """Calculate complete log likelihood, log p(w,z)
@@ -383,15 +601,66 @@ class LDA:
         nd = np.sum(ndz, axis=1).astype(np.intc)
         return _lda._loglikelihood(nzw, ndz, nz, nd, alpha, beta)
 
-    def _sample_topics(self, rands):
-        """Samples all topic assignments. Called once per iteration."""
+    """def _sample_topics(self, rands):
+        Samples all topic assignments. Called once per iteration.
+
+        Calls Cython routine for speed
+
+
         n_topics, vocab_size = self.nzw_.shape
+
         alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
         beta = np.repeat(self.beta, vocab_size).astype(np.float64)
-        delta = np.repeat(self.delta, vocab_size).astype(np.float64)
-        Delta = np.repeat(self.Delta, self.n_regions).astype(np.float64)
+        delta = np.repeat(self.delta, vocab_size).astype(np.float64) # for cross collection
+        Delta = np.repeat(self.Delta, self.n_regions).astype(np.float64) # for region
 
         _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS, self.RS, self.LS,
          self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwcr_, self.nzcr_, self.ndr_,
          self.nr_, Delta, alpha, beta, delta, self.gamma_0, self.gamma_1, rands, self.lambda_0,
          self.S_0, self.mu_0, self.v_0)
+    """
+
+    def _sample_Ls(self, rands):
+        """
+        Samples all topic assignments. Called once per iteration.
+
+        Calls Cython routine for speed
+        """
+
+        Delta = np.repeat(self.Delta, self.n_regions).astype(np.float64) # for region
+
+        _lda._sample_Ls(self.RS, self.LS, self.ndr_, self.nr_, Delta, rands,
+        self.lambda_0, self.S_0, self.mu_0, self.v_0)
+
+    def _sample_topics(self, rands):
+        """Samples all topic assignments. Called once per iteration.
+
+        Calls Cython routine for speed
+        """
+
+        n_topics, vocab_size = self.nzw_.shape
+
+        alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
+        beta = np.repeat(self.beta, vocab_size).astype(np.float64)
+        delta = np.repeat(self.delta, vocab_size).astype(np.float64) # for cross collection
+
+        _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS,
+         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwc_, self.nzc_, alpha,
+         beta, delta, self.gamma_0, self.gamma_1, rands)
+
+
+    def _sample_topics_complete(self, rands):
+        """Samples all topic assignments. Called once per iteration.
+
+        Calls Cython routine for speed
+        """
+
+        n_topics, vocab_size = self.nzw_.shape
+
+        alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
+        beta = np.repeat(self.beta, vocab_size).astype(np.float64)
+        delta = np.repeat(self.delta, vocab_size).astype(np.float64) # for cross collection
+
+        _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS,
+         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwc_, self.nzc_, alpha,
+         beta, delta, self.gamma_0, self.gamma_1, rands)

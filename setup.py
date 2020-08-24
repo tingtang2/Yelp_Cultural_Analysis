@@ -5,5 +5,7 @@ exts = Extension(name = "_lda",
                  sources = ["./lda/_lda.pyx", "./lda/gamma.c"])
 
 setup(
-    ext_modules = cythonize(exts, gdb_debug=True)
+    name = "sampling_tools",
+    ext_modules = cythonize(exts, gdb_debug=True),
+    zip_safe=False
 )
