@@ -71,111 +71,34 @@ cdef int searchsorted(double* arr, int length, double value) nogil:
             imax = imid
     return imin
 
-
-"""
-
-def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:] RS, double[:, :] LS, int[:, :, :, :] nx,int[:, :] nzw,
-                  int[:, :] ndz, int[:] nz, int[:, :, :, :] nzwcr, int[:, :, :] nzcr, int[:, :] ndr, int[:] nr,
-                  double[:] Delta, double[:] alpha, double[:] beta, double[:] delta,
-                  double gamma_0, double gamma_1, double[:] rands, double lambda_0, double[:, :] S_0, double[:] mu_0,
-                  double v_0):
+def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:] RS, double[:, :] LS, int[:, :, :, :] nx,int[:, :] nzw,
+                  int[:, :] ndz, int[:] nz, int[:, :, :] nzwc, int[:, :] nzc, int[:, :, :] nzwr, int[:, :] nzr,
+                  double[:] alpha, double[:] beta, double[:] delta,
+                  double[:] gamma, double[:] rands):
     cdef int i, k, w, d, c, z, z_new, x, x_new, rr, r_new
     cdef double r
     cdef int N = WS.shape[0]
     cdef int n_rand = rands.shape[0]
     cdef int n_topics = nz.shape[0]
-    cdef int n_regions = nr.shape[0]
 
-    cdef double dist_cum = 0
+    cdef double dist_cum
     cdef double dist_cum_x = 0
-    cdef double dist_cum_r = 0
 
     cdef double beta_sum = 0
     cdef double delta_sum = 0
     cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
-    cdef double* dist_sum_x = <double*> malloc(2 * sizeof(double))
+    cdef double* dist_sum_x = <double*> malloc(3 * sizeof(double))
 
-
-    C = np.zeros((2, 2), dtype=np.double)
 
     if dist_sum is NULL:
         raise MemoryError("Could not allocate memory during sampling.")
 
 
-    y_bar = np.mean(LS)
-
-    inv_RS = {i:[] for i in range(n_regions)}
-
-    for i in range(len(RS)):
-        inv_RS[RS[i]].append(i)
-
-
     #print("\n" + str(inv_RS))
-
-    # gibbs sampling for regions
-    for d in range(len(RS)):
-
-        rr = RS[d]
-        print("d", d, "rr", rr)
-        ndr[d, rr] -= 1
-
-        dist_sum_r = np.zeros(n_regions)
-
-        for reg in range(n_regions):
-            #print("reg", reg)
-            N_ = nr[reg]
-
-            Is = inv_RS[reg]
-            #print(Is)
-
-            # find constant C
-            for i in Is:
-                L = np.array(LS[i], dtype=(np.double, np.double))
-                #p
-                printfrint(L)
-                #print(((L - y_bar).T).dot((L - y_bar)))
-                C += ((L - y_bar).T).dot((L - y_bar))
-
-            #print("C", C)
-
-            S_N = np.array(S_0) + np.array(C) + (lambda_0 * N_/(lambda_0+ N_)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
-            S_N1 = np.array(S_0) + np.array(C) + (lambda_0 * N/(lambda_0+ N_-1)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
-
-            prob = pow(M_PI, -2/2)*pow((lambda_0+N)/(lambda_0+N_-1), -2/2)*pow(np.linalg.det(S_N), -(v_0+N_)/2)/pow(np.linalg.det(S_N1), -(v_0+N_-1)/2)*exp(lgamma((v_0 + N_)/2))/exp(lgamma((v_0 + N_ -2)/2))
-
-            #print("computed prob")
-
-            dist_cum_r += (ndr[d, reg] + Delta[reg]) * prob
-            dist_sum_r[reg] = dist_cum_r
-
-
-        #r = rands[d % n_rand] * dist_cum_r
-
-        #print("index for rand, d:", d % n_rand)
-
-        rr_new = np.searchsorted(dist_sum_r, np.random.rand() * dist_cum_r, side='left')
-        #rr_new = np.searchsorted(dist_sum_r, r, side='right')
-        #rr_new = searchsorted(dist_sum, n_regions, np.random.rand() * dist_cum_r)
-        #printf("z_new %d\n", z_new)
-
-        #print("rr_new", rr_new)
-
-        if rr_new == -1:
-            rr_new = rr_new +1
-            print("oh no")
-
-        #inc(ndr[d, rr_new])
-        ndr[d, rr_new] += 1
-        #print("increment count")
-        RS[d] = rr_new
-        #print("assign")
-
-    #free(dist_sum_r)
 
     with nogil:
 
         # first equation
-        printf("here1 \n")
         for i in range(beta.shape[0]):
             beta_sum += beta[i]
 
@@ -192,21 +115,29 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
             x = XS[i]
             rr = RS[d]
 
-            dec(nx[x, c, z, rr])
+            dec(nx[x, c, rr, z])
             dec(ndz[d, z])
 
             if x == 0:
                 dec(nzw[z, w])
                 dec(nz[z])
+            elif x == 1:
+                dec(nzwc[z, w, c])
+                dec(nzc[z, c])
             else:
-                dec(nzwcr[z, w, c, rr])
-                dec(nzcr[z, c, rr])
+                dec(nzwr[z, w, rr])
+                dec(nzr[z, rr])
 
-            dist_cum_x = (nx[0,c,z, rr] + gamma_0) * (ndr[d, rr] + Delta[rr]) * (nzw[z,w] + beta[w]) / (nz[z] + beta_sum)
+
+            dist_cum_x = (nx[0,c, rr, z] + gamma[w])* (nzw[z,w] + beta[w]) / (nz[z] + beta_sum)
             dist_sum_x[0] = dist_cum_x
 
-            dist_cum_x += (nx[1,c,z,rr] + gamma_1) * (ndr[d, rr] + Delta[rr]) * (nzwcr[z,w,c, rr] + delta[w]) / (nzcr[z,c, rr] + delta_sum)
+            dist_cum_x += (nx[1,c, rr, z] + gamma[w]) * (nzwc[z,w,c] + delta[w]) / (nzc[z,c] + delta_sum)
             dist_sum_x[1] = dist_cum_x
+
+            dist_cum_x += (nx[2,c,rr, z] + gamma[w]) * (nzwr[z,w,rr] + delta[w]) / (nzr[z, rr] + delta_sum)
+            dist_sum_x[2] = dist_cum_x
+
 
 
             r = rands[i % n_rand] * dist_cum_x
@@ -215,39 +146,51 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
 
             #x_new = searchsorted(dist_sum_x, 2, r)
 
+
             if r < dist_sum_x[0]:
                 x_new = 0
-            else:
+            elif r < dist_sum_x[1]:
                 x_new = 1
+            else:
+                x_new = 2
 
-
+            dist_cum = 0
             if x_new == 0:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
-                    dist_cum += ((nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k])) * (ndr[d, rr] + Delta[rr])
+                    dist_cum += ((nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k]))
                     dist_sum[k] = dist_cum
 
+                r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
+                z_new = searchsorted(dist_sum, n_topics, r)
+            elif x_new == 1:
+                for k in range(n_topics):
+                    # beta is a double so cdivision yields a double
+                    dist_cum += ((nzwc[k, w, c] + delta[w]) / (nzc[k, c] + delta_sum)) * (ndz[d, k] + alpha[k])
+                    dist_sum[k] = dist_cum
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
                 z_new = searchsorted(dist_sum, n_topics, r)
             else:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
-                    dist_cum += (nzwcr[k, w, c, rr] + delta[w]) / (nzcr[k, c, rr] + delta_sum) * (ndz[d, k] + alpha[k]) * (ndr[d, rr] + Delta[rr])
+                    dist_cum += ((nzwr[k, w, rr] + delta[w]) / (nzr[k, rr] + delta_sum)) * (ndz[d, k] + alpha[k])
                     dist_sum[k] = dist_cum
-
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
                 z_new = searchsorted(dist_sum, n_topics, r)
-                #printf("z_new %d\n", z_new)
 
 
             if x_new == 0:
                 inc(nzw[z_new, w])
                 inc(nz[z_new])
+            elif x_new == 1:
+                inc(nzwc[z_new, w, c])
+                inc(nzc[z_new, c])
             else:
-                inc(nzwcr[z_new, w, c, rr])
-                inc(nzcr[z_new, c, rr])
+                inc(nzwr[z_new, w, rr])
+                inc(nzr[z_new, rr])
 
-            inc(nx[x, c, z_new, rr])
+
+            inc(nx[x_new, c, rr, z_new])
             inc(ndz[d, z_new])
 
             ZS[i] = z_new
@@ -257,7 +200,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:]
         free(dist_sum)
         free(dist_sum_x)
 
-"""
+
 '''
 def _update_covariance(L, x, n):
     if n == 0:
@@ -304,9 +247,9 @@ cdef cholupdate(np.ndarray[FLOAT_t, ndim=2] R, np.ndarray[FLOAT_t, ndim=1] x):
             x[<unsigned int>i] = c * x[<unsigned int>i] - s * R[<unsigned int>k,<unsigned int>i]
 
 '''
-def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] Delta, double[:] rands, 
+def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] Delta, double[:] rands,
         double lambda_0, double[:, :] S_0, double[:] mu_0, double v_0):
-    
+
     cdef int i, k, w, d, c, z, z_new, x, x_new, rr, r_new
     cdef double r
     cdef int n_rand = rands.shape[0]
@@ -325,7 +268,7 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
         inv_RS[RS[i]].append(i)
 
     #print("\n" + str(inv_RS))
-    
+
     S_0 = np.array(S_0)
 
     # cholesky decomposition of prior parameter
@@ -335,7 +278,7 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
     for d in range(len(RS)):
         rr = RS[d]
         ll = LS[d]
-        
+
         ndr[d, rr] -= 1
 
         dist_sum_r = np.zeros(n_regions)
@@ -347,12 +290,12 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
 
             # doc indices for region
             Is = inv_RS[reg]
-            
+
             # update parameters of NIW
 
             # sum of square differences compared to mean
             C = np.zeros((2, 2), dtype=np.double)
-            
+
             y_bar = np.mean([LS[i] for i in Is])
 
             for i in Is:
@@ -369,7 +312,7 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
             mu_n1 = (lambda_0 * np.array(mu_0) + ((N_ - 1) * y_bar))/(lambda_n -1)
 
             df = v_n -1 -2 +1
-            
+
             S_N = S_0 + C + (lambda_0 * N_/(lambda_0+ N_)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
             S_N1 = S_0 + C + (lambda_0 * N_/(lambda_0+ N_-1)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
 
@@ -388,10 +331,10 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
             #print("exponent", -(df +2)/2)
 
             prob = (((ll - mu_n1).T.dot(inv)).dot(ll - mu_n1)) # ** (-(df +2)/2) #((1 + (1/df)* ((ll - mu_n1).T.dot(inv)).dot(ll - mu_n1)) ** (-(df +2)/2) )
- #gamma((df + 2)/2)/(gamma(df/2)* M_PI * (det ** 0.5)) * 
+ #gamma((df + 2)/2)/(gamma(df/2)* M_PI * (det ** 0.5)) *
 
             #prob = -1 * logpdf(ll, mu_n1, var, df)
-            
+
             #print("computed prob", prob)
 
             dist_cum_r += (ndr[d, reg] + Delta[reg]) * prob
@@ -411,7 +354,7 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
 
         #inc(ndr[d, rr_new])
         ndr[d, rr_new] += 1
-        
+
         RS[d] = rr_new
 
     #free(dist_sum_r)
@@ -424,7 +367,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
     cdef int n_rand = rands.shape[0]
     cdef int n_topics = nz.shape[0]
 
-    cdef double r 
+    cdef double r
 
     cdef double dist_cum, dist_cum_x
 
@@ -487,7 +430,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
             if x_new == 0:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
-                    dist_cum += ((nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k]))    
+                    dist_cum += ((nzw[k, w] + beta[w]) / (nz[k] + beta_sum)) * (ndz[d, k] + alpha[k])
                     dist_sum[k] = dist_cum
 
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
@@ -496,7 +439,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
             else:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
-                    dist_cum += (nzwc[k, w, c] + delta[w]) / (nzc[k, c] + delta_sum) * (ndz[d, k] + alpha[k])  
+                    dist_cum += ((nzwc[k, w, c] + delta[w]) / (nzc[k, c] + delta_sum)) * (ndz[d, k] + alpha[k])
                     dist_sum[k] = dist_cum
 
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]

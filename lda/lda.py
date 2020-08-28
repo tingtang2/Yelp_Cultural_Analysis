@@ -10,6 +10,8 @@ import numpy as np
 import _lda
 import utils
 
+import sklearn.mixture
+
 logger = logging.getLogger('lda')
 
 PY2 = sys.version_info[0] == 2
@@ -133,7 +135,7 @@ class LDA:
 
 
     def fit_complete(self, X, cc, ls, y=None):
-        Fit the model with X.
+        """Fit the model with X.
 
         Parameters
         ----------
@@ -146,7 +148,7 @@ class LDA:
         Returns
         -------
         self : object
-            Returns the instance itself.
+            Returns the instance itself."""
 
         self._fit_complete(X, cc, ls)
         return self
@@ -315,6 +317,35 @@ class LDA:
             if it % self.refresh == 0:
                 print(str(it) + "/" + str(self.n_iter))
 
+        print("Burnin finished")
+
+
+        sum_ndz = self.ndz_
+        sum_nzw = self.nzw_
+
+        sum_nzwc = self.nzwc_
+        sum_nzwr = self.nzwr_
+
+
+        # 15 samples, 1000 lag
+        for it in range(1500):
+            self._sample_topics_complete(rands)
+
+            if it % 100 == 0:
+                sum_ndz += self.ndz_
+                sum_nzw += self.nzw_
+
+                sum_nzwc += self.nzwc_
+                sum_nzwr += self.nzwr_
+                print(str(it) + "/" + str(1500))
+
+
+        self.ndz_ = sum_ndz / 15.0
+        self.nzw_ = sum_nzw / 15.0
+
+        self.nzwc_ = sum_nzwc / 15.0
+        self.nzwr_ = sum_nzwr / 15.0
+
 
         #ll = self.loglikelihood()
         #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
@@ -325,13 +356,19 @@ class LDA:
         self.doc_topic_ = (self.ndz_ + self.alpha).astype(float)
         self.doc_topic_ /= np.sum(self.doc_topic_, axis=1)[:, np.newaxis]
 
+        # word distributions for individual collections
+        self.topic_word_collection_ = (self.nzwc_ + self.delta).astype(float)
+        #self.topic_word_collection_ /= np.sum(self.topic_word_collection_, axis=1)[:, np.newaxis, :]
+
+        # word distributions for individual regions
+        self.topic_word_region_ = (self.nzwr_ + self.gamma_0).astype(float)
+        #self.topic_word_region_ /= np.sum(self.topic_word_region_, axis=1)[:, np.newaxis, :]
+
         # delete attributes no longer needed after fitting to save memory and reduce clutter
         del self.WS
         del self.DS
         del self.ZS
-        del self.XS
         del self.CS
-        del self.RS
 
         return self
 
@@ -349,6 +386,8 @@ class LDA:
         random_state = utils.check_random_state(self.random_state)
         rands = self._rands.copy()
         self._initialize(X, cc)
+
+        # Burn in
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
@@ -364,9 +403,36 @@ class LDA:
                 print(str(it) + "/" + str(self.n_iter))
 
 
+        sum_ndz = self.ndz_
+        sum_nzw = self.nzw_
+
+        sum_nzwc = self.nzwc_
+
+        # 15 samples, 1000 lag
+        for it in range(1500):
+            self._sample_topics(rands)
+
+            if it % 100 == 0:
+                sum_ndz += self.ndz_
+                sum_nzw += self.nzw_
+
+                sum_nzwc += self.nzwc_
+                print(str(it) + "/" + str(1500))
+
+
+
+
+
         #ll = self.loglikelihood()
         #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
         # note: numpy /= is integer division
+
+        self.ndz_ = sum_ndz / 15.0
+        self.nzw_ = sum_nzw / 15.0
+
+        self.nzwc_ = sum_nzwc / 15.0
+
+
         self.components_ = (self.nzw_ + self.beta).astype(float)
         self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
         self.topic_word_ = self.components_
@@ -450,57 +516,59 @@ class LDA:
         self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
         self.nzr_ = nzr_ = np.zeros((n_topics, n_regions), dtype=np.intc) # topic counts for each collection
 
-        self.nxc_ = nxc_ = np.zeros((2, C, n_topics), dtype=np.intc) # indicators for each collection for each topic
-        self.nxr_ = nxr_ = np.zeros((2, n_regions, n_topics), dtype=np.intc) # indicators for each region for each topic
+        self.nx_ = nx_ = np.zeros((3, C, n_regions, n_topics), dtype=np.intc) # indicators for each collection for each topic
 
-
-        self.ndr_ = ndr_ = np.zeros((D, n_regions), dtype=np.intc) # sigmas for each doc
-        self.nr_ = nr_ = np.zeros(n_regions, dtype=np.intc)
-        #self.nrl_ = nrl_ = np.zeros((n_regions, D), dtype=np.single) # regions by location
 
 
         self.WS, self.DS = WS, DS = utils.matrix_to_lists(X)
         # for regions
         self.CS = CS = cc
-        self.RS = RS = np.empty_like(self.CS, dtype=np.intc) # regions for each doc
+
+        dpgmm = sklearn.mixture.BayesianGaussianMixture(verbose=1, n_components=n_regions, max_iter=500)
+
+        self.RS = RS = dpgmm.fit_predict(ls) # regions for each doc
+        self.RS = RS = RS.astype('intc')
         self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc)
 
-        # TO DO: check if initializing xs as zeros or random is better
+        # TODO: check if initializing xs as zeros or random is better
+        self.XS = XS = np.empty_like(self.WS, dtype=np.intc)
         #self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
-        self.XS = XS = np.zeros(self.WS.shape[0], dtype=np.intc) # indicator for background
-        XS = XS.astype('intc')
-        self.XS = XS
+        #self.XS = XS = np.zeros(self.WS.shape[0], dtype=np.intc) # indicator for background
+        #XS = XS.astype('intc')
+        #self.XS = XS
+
 
         self.LS = LS = ls
 
         np.testing.assert_equal(N, len(WS))
 
-        for i in range(D):
-            r_new = i % n_regions
-            RS[i] = r_new
-
-            ndr_[i, r_new] += 1
-            nr_[r_new] += 1
-
         for i in range(N):
-            w, d, x = WS[i], DS[i], XS[i]
+            w, d, = WS[i], DS[i]
             c = CS[d]
             rr = RS[d]
+
+            x_new = i % 3
+            XS[i] = x_new
 
             z_new = i % n_topics
             ZS[i] = z_new
 
-
             ndz_[d, z_new] += 1
-            nx_[x, c,rr, z_new] += 1
+            nx_[x_new, c,rr, z_new] += 1
 
-            if x == 0:
+            if x_new == 0:
                 nzw_[z_new, w] += 1
                 nz_[z_new] += 1
-            else:
-                nzwcr_[z_new, w, c, r_new] += 1
+            elif x_new ==1:
+                nzwc_[z_new, w, c] += 1
                 nzc_[z_new, c] += 1
+            else:
+                nzwr_[z_new, w,rr] += 1
+                nzr_[z_new, rr] += 1
 
+
+
+        print(nx_)
         print("Finished initializing")
         self.loglikelihoods_ = []
 
@@ -668,7 +736,8 @@ class LDA:
         alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
         beta = np.repeat(self.beta, vocab_size).astype(np.float64)
         delta = np.repeat(self.delta, vocab_size).astype(np.float64) # for cross collection
+        gamma = np.repeat(self.gamma_0, 3).astype(np.float64)
 
-        _lda._sample_topics(self.WS, self.DS, self.ZS, self.CS, self.XS,
-         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwc_, self.nzc_, alpha,
-         beta, delta, self.gamma_0, self.gamma_1, rands)
+        _lda._sample_topics_complete(self.WS, self.DS, self.ZS, self.CS, self.XS, self.RS, self.LS,
+         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwc_, self.nzc_, self.nzwr_,
+         self.nzr_, alpha, beta, delta, gamma, rands)
