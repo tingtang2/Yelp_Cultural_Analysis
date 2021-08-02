@@ -6,11 +6,13 @@ import logging
 import sys
 
 import numpy as np
+from numpy import ma
 
 import _lda
 import utils
 
 import sklearn.mixture
+from tqdm import tqdm
 
 logger = logging.getLogger('lda')
 
@@ -93,9 +95,16 @@ class LDA:
     doi:10.1007/978-3-642-05224-8_6.
 
     """
-    def __init__(self, n_topics, n_regions= 10, n_iter=1000, alpha=0.1, beta=0.01, delta =.01, gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, mu_0 = np.array([44, -103], dtype=np.double), S_0 = np.array([[1, 0], [0, 1]], dtype=np.double), lambda_0 = 1, v_0 =3, random_state=None, refresh=10):
+    def __init__(self, n_topics, n_regions= 10, n_regions_fluid = [5, 7 ,6],
+     region_assignments = None, indices_region_assignments = None, n_iter=1000, alpha=0.1, beta=0.01,
+     delta =.01, gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, mu_0 = np.array([44, -103], dtype=np.double),
+     S_0 = np.array([[1, 0], [0, 1]], dtype=np.double), lambda_0 = 1, v_0 =3, random_state=None, refresh=10):
+
         self.n_topics = n_topics
         self.n_regions = n_regions
+        self.reg_assign = region_assignments
+        self.ind_reg_assign = indices_region_assignments
+        self.n_regions_fluid = n_regions_fluid
         self.n_iter = n_iter
 
         '''def __init__(self, n_topics, n_iter=1000, alpha=0.1, beta=0.01, delta =.01, gamma_0 = 1.0, gamma_1 = 1.0, Delta = .1, random_state=None, refresh=10):'''
@@ -132,6 +141,25 @@ class LDA:
         # configure console logging if not already configured
         if len(logger.handlers) == 1 and isinstance(logger.handlers[0], logging.NullHandler):
             logging.basicConfig(level=logging.INFO)
+
+    def fit_fluid(self, X, cc, ls, y=None):
+        """Fit the model with X.
+
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training data, where n_samples in the number of samples
+            and n_features is the number of features. Sparse matrix allowed.
+        cc: array of collections corresponding the ethnic cuisine type of each restaurant
+        ls: array of locations coordinates for each review
+
+        Returns
+        -------
+        self : object
+            Returns the instance itself."""
+
+        self._fit_fluid(X, cc, ls)
+        return self
 
 
     def fit_complete(self, X, cc, ls, y=None):
@@ -289,6 +317,94 @@ class LDA:
         assert thbeta_doc.shape == (self.n_topics,)
         return thbeta_doc
 
+    def _fit_fluid(self, X, cc, ls):
+        """
+        Fit the model to the data X
+
+        Parameters
+        ----------
+        X: array-like, shape (n_samples, n_features)
+            Training vector, where n_samples in the number of samples and
+            n_features is the number of features. Sparse matrix allowed.
+        """
+
+        random_state = utils.check_random_state(self.random_state)
+        rands = self._rands.copy()
+        self._initialize_fluid(X, cc, ls)
+
+        with tqdm(total= self.n_iter) as pbar:
+            for it in range(self.n_iter):
+                # FIXME: using numpy.roll with a random shift might be faster
+                random_state.shuffle(rands)
+                '''
+                if it % self.refresh == 0:
+                    ll = self.loglikelihood()
+                    logger.info("<{}> log likelihood: {:.0f}".format(it, ll))
+                    # keep track of loglikelihoods for monitoring convergence
+                    self.loglikelihoods_.append(ll)
+                '''
+                self._sample_topics_fluid(rands)
+                if it % self.refresh == 0:
+                    #print(str(it) + "/" + str(self.n_iter)) #+ ": " + str(self.loglikelihood_complete()))
+                    pbar.update(self.refresh)
+
+        print("Burnin finished")
+
+        '''sum_ndz = self.ndz_
+        sum_nzw = self.nzw_
+
+        sum_nzwcr = self.nzwcr_
+
+        # 15 samples, 1000 lag
+        for it in range(1500):
+            self._sample_topics_fluid(rands)
+
+            if it % 100 == 0:
+                sum_ndz += self.ndz_
+
+                sum_nzw += self.nzw_
+
+                sum_nzwcr += self.nzwcr_
+                print(str(it) + "/" + str(1500))
+
+
+        self.ndz_ = sum_ndz / 15.0
+        self.nzw_ = sum_nzw / 15.0
+
+        self.nzwrs = sum_nzwcr / 15.0'''
+
+
+
+
+        #ll = self.loglikelihood()
+        #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
+        # note: numpy /= is integer division
+        self.components_ = (self.nzw_ + self.beta).astype(float)
+        self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
+        self.topic_word_ = self.components_
+        self.doc_topic_ = (self.ndz_ + self.alpha).astype(float)
+        self.doc_topic_ /= np.sum(self.doc_topic_, axis=1)[:, np.newaxis]
+
+        print("done with topic word and doc topic")
+
+        # word distributions for individual collections
+
+        #self.topic_word_collection_ = (self.nzwcr_ + self.delta).astype(float)
+        #self.topic_word_collection_ = [(x + self.delta).astype(float) for x in self.nzwrs]
+        #self.topic_word_collection_ /= np.sum(self.topic_word_collection_, axis=1)[:, np.newaxis, :, :]
+
+        print("done with topic_word_regions")
+
+
+        # delete attributes no longer needed after fitting to save memory and reduce clutter
+        del self.WS
+        del self.DS
+        del self.ZS
+        del self.CS
+
+        return self
+
+
     def _fit_complete(self, X, cc, ls):
         """
         Fit the model to the data X
@@ -303,6 +419,7 @@ class LDA:
         random_state = utils.check_random_state(self.random_state)
         rands = self._rands.copy()
         self._initialize_complete(X, cc, ls)
+
         for it in range(self.n_iter):
             # FIXME: using numpy.roll with a random shift might be faster
             random_state.shuffle(rands)
@@ -315,7 +432,7 @@ class LDA:
             '''
             self._sample_topics_complete(rands)
             if it % self.refresh == 0:
-                print(str(it) + "/" + str(self.n_iter))
+                print(str(it) + "/" + str(self.n_iter) + ": " + str(self.loglikelihood_complete()))
 
         print("Burnin finished")
 
@@ -323,8 +440,8 @@ class LDA:
         sum_ndz = self.ndz_
         sum_nzw = self.nzw_
 
-        sum_nzwc = self.nzwc_
-        sum_nzwr = self.nzwr_
+        sum_nzwcr = self.nzwcr_
+
 
 
         # 15 samples, 1000 lag
@@ -335,16 +452,14 @@ class LDA:
                 sum_ndz += self.ndz_
                 sum_nzw += self.nzw_
 
-                sum_nzwc += self.nzwc_
-                sum_nzwr += self.nzwr_
+                sum_nzwcr += self.nzwcr_
                 print(str(it) + "/" + str(1500))
 
 
         self.ndz_ = sum_ndz / 15.0
         self.nzw_ = sum_nzw / 15.0
 
-        self.nzwc_ = sum_nzwc / 15.0
-        self.nzwr_ = sum_nzwr / 15.0
+        self.nzwcr_ = sum_nzwcr / 15.0
 
 
         #ll = self.loglikelihood()
@@ -357,12 +472,8 @@ class LDA:
         self.doc_topic_ /= np.sum(self.doc_topic_, axis=1)[:, np.newaxis]
 
         # word distributions for individual collections
-        self.topic_word_collection_ = (self.nzwc_ + self.delta).astype(float)
-        #self.topic_word_collection_ /= np.sum(self.topic_word_collection_, axis=1)[:, np.newaxis, :]
-
-        # word distributions for individual regions
-        self.topic_word_region_ = (self.nzwr_ + self.gamma_0).astype(float)
-        #self.topic_word_region_ /= np.sum(self.topic_word_region_, axis=1)[:, np.newaxis, :]
+        self.topic_word_collection_ = (self.nzwcr_ + self.delta).astype(float)
+        #self.topic_word_collection_ /= np.sum(self.topic_word_collection_, axis=1)[:, np.newaxis, :, :]
 
         # delete attributes no longer needed after fitting to save memory and reduce clutter
         del self.WS
@@ -371,7 +482,6 @@ class LDA:
         del self.CS
 
         return self
-
 
 
     def _fit(self, X, cc):
@@ -388,19 +498,21 @@ class LDA:
         self._initialize(X, cc)
 
         # Burn in
-        for it in range(self.n_iter):
-            # FIXME: using numpy.roll with a random shift might be faster
-            random_state.shuffle(rands)
-            '''
-            if it % self.refresh == 0:
-                ll = self.loglikelihood()
-                logger.info("<{}> log likelihood: {:.0f}".format(it, ll))
-                # keep track of loglikelihoods for monitoring convergence
-                self.loglikelihoods_.append(ll)
-            '''
-            self._sample_topics(rands)
-            if it % self.refresh == 0:
-                print(str(it) + "/" + str(self.n_iter))
+        with tqdm(total= self.n_iter) as pbar:
+            for it in range(self.n_iter):
+                # FIXME: using numpy.roll with a random shift might be faster
+                random_state.shuffle(rands)
+                '''
+                if it % self.refresh == 0:
+                    ll = self.loglikelihood()
+                    logger.info("<{}> log likelihood: {:.0f}".format(it, ll))
+                    # keep track of loglikelihoods for monitoring convergence
+                    self.loglikelihoods_.append(ll)
+                '''
+                self._sample_topics(rands)
+                if it % self.refresh == 0:
+                    #print(str(it) + "/" + str(self.n_iter))
+                    pbar.update(self.refresh)
 
 
         sum_ndz = self.ndz_
@@ -408,8 +520,9 @@ class LDA:
 
         sum_nzwc = self.nzwc_
 
+        '''
         # 15 samples, 1000 lag
-        for it in range(1500):
+        for it in range(200):
             self._sample_topics(rands)
 
             if it % 100 == 0:
@@ -417,9 +530,7 @@ class LDA:
                 sum_nzw += self.nzw_
 
                 sum_nzwc += self.nzwc_
-                print(str(it) + "/" + str(1500))
-
-
+                print(str(it) + "/" + str(200))
 
 
 
@@ -427,11 +538,12 @@ class LDA:
         #logger.info("<{}> log likelihood: {:.0f}".format(self.n_iter - 1, ll))
         # note: numpy /= is integer division
 
-        self.ndz_ = sum_ndz / 15.0
-        self.nzw_ = sum_nzw / 15.0
+        self.ndz_ = sum_ndz / 2.0
+        self.nzw_ = sum_nzw / 2.0
 
-        self.nzwc_ = sum_nzwc / 15.0
+        self.nzwc_ = sum_nzwc / 2.0
 
+        '''
 
         self.components_ = (self.nzw_ + self.beta).astype(float)
         self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
@@ -491,13 +603,15 @@ class LDA:
 
         return self
 
-    def _initialize_complete(self, X, cc, ls):
+    def _initialize_fluid(self, X, cc, ls):
         D, W = X.shape  # documents and vocab size
         N = int(X.sum()) # number of total tokens
         C = len(set(cc)) # number of collections
         n_topics = self.n_topics
-        n_regions = self.n_regions
+        n_regions_fluid = self.n_regions_fluid
         n_iter = self.n_iter
+
+        max_regions = np.max(n_regions_fluid)
         #logger.info("n_documents: {}".format(D))
         #logger.info("vocab_size: {}".format(W))
         #logger.info("n_words: {}".format(N))
@@ -511,23 +625,28 @@ class LDA:
         self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
 
         # for ethnic cuisines x region distributions
-        self.nzwc_ = nzwc_ =  np.zeros((n_topics, W, C), dtype=np.intc) # phis for each collection
-        self.nzwr_ = nzwr_ =  np.zeros((n_topics, W, n_regions), dtype=np.intc) # phis for each region
-        self.nzc_ = nzc_ = np.zeros((n_topics, C), dtype=np.intc) # topic counts for each collection
-        self.nzr_ = nzr_ = np.zeros((n_topics, n_regions), dtype=np.intc) # topic counts for each collection
+        self.nzwcr_ =  np.zeros((n_topics, W, C, max_regions), dtype=np.intc) # phis for each region
+        self.nzcr_ = np.zeros((n_topics, C, max_regions), dtype=np.intc) # topic counts for each region
 
-        self.nx_ = nx_ = np.zeros((3, C, n_regions, n_topics), dtype=np.intc) # indicators for each collection for each topic
+        '''# create masks
+        word_masks =  np.zeros((n_topics, W, C, max_regions), dtype=np.intc)
+        topic_masks = np.zeros((n_topics, C, max_regions), dtype=np.intc)
 
+        for c in range(C):
+            word_masks[:, :, c, n_regions_fluid[c]:max_regions] = 1
+            topic_masks[:, c, n_regions_fluid[c]:max_regions] = 1
+        print(word_masks)
 
+        self.nzwcr_ =  ma.masked_array(self.nzwcr_, mask= word_masks)
+        self.nzcr_ =  ma.masked_array(self.nzcr_, mask= topic_masks)
+        '''
+
+        self.nx_ = nx_ = np.zeros((2, C, n_topics), dtype=np.intc) # indicators for each collection for each topic
 
         self.WS, self.DS = WS, DS = utils.matrix_to_lists(X)
-        # for regions
         self.CS = CS = cc
 
-        dpgmm = sklearn.mixture.BayesianGaussianMixture(verbose=1, n_components=n_regions, max_iter=500)
 
-        self.RS = RS = dpgmm.fit_predict(ls) # regions for each doc
-        self.RS = RS = RS.astype('intc')
         self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc)
 
         # TODO: check if initializing xs as zeros or random is better
@@ -545,30 +664,29 @@ class LDA:
         for i in range(N):
             w, d, = WS[i], DS[i]
             c = CS[d]
-            rr = RS[d]
+            j = self.ind_reg_assign[d]
 
-            x_new = i % 3
+            #print('c:', c, 'j:', j, 'length:', len(self.reg_assign[c]))
+
+            rr = self.reg_assign[c][j]
+
+            x_new = i % 2
             XS[i] = x_new
 
             z_new = i % n_topics
             ZS[i] = z_new
 
             ndz_[d, z_new] += 1
-            nx_[x_new, c,rr, z_new] += 1
+            nx_[x_new, c, z_new] += 1
 
             if x_new == 0:
                 nzw_[z_new, w] += 1
                 nz_[z_new] += 1
-            elif x_new ==1:
-                nzwc_[z_new, w, c] += 1
-                nzc_[z_new, c] += 1
             else:
-                nzwr_[z_new, w,rr] += 1
-                nzr_[z_new, rr] += 1
+                self.nzwcr_[z_new, w, c, rr] += 1
+                self.nzcr_[z_new, c, rr] += 1
 
 
-
-        print(nx_)
         print("Finished initializing")
         self.loglikelihoods_ = []
 
@@ -635,6 +753,81 @@ class LDA:
         print("Finished initializing")
         self.loglikelihoods_ = []
 
+    def _initialize_complete(self, X, cc, ls):
+        D, W = X.shape  # documents and vocab size
+        N = int(X.sum()) # number of total tokens
+        C = len(set(cc)) # number of collections
+        n_topics = self.n_topics
+        n_regions = self.n_regions
+        n_iter = self.n_iter
+        #logger.info("n_documents: {}".format(D))
+        #logger.info("vocab_size: {}".format(W))
+        #logger.info("n_words: {}".format(N))
+        #logger.info("n_collections: {}".format(C))
+        #logger.info("n_topics: {}".format(n_topics))
+        #logger.info("n_iter: {}".format(n_iter))
+
+        # for background distribution
+        self.nzw_ = nzw_ = np.zeros((n_topics, W), dtype=np.intc)
+        self.ndz_ = ndz_ = np.zeros((D, n_topics), dtype=np.intc)
+        self.nz_ = nz_ = np.zeros(n_topics, dtype=np.intc)
+
+
+        eth_reg_data = [] # allow for region fluidity
+
+        # for ethnic cuisines x region distributions
+        self.nzwcr_ = nzwcr_ =  np.zeros((n_topics, W, C, n_regions), dtype=np.intc) # phis for each collection x region
+        self.nzcr_ = nzcr_ = np.zeros((n_topics, C, n_regions), dtype=np.intc) # topic counts for each collection x region
+
+        self.nx_ = nx_ = np.zeros((2, C, n_regions, n_topics), dtype=np.intc) # indicators for each collection for each topic
+
+        self.WS, self.DS = WS, DS = utils.matrix_to_lists(X)
+        self.CS = CS = cc
+
+        dpgmm = sklearn.mixture.BayesianGaussianMixture(verbose=1, n_components=n_regions, max_iter=500)
+
+        self.RS = RS = dpgmm.fit_predict(ls) # regions for each doc
+        self.RS = RS = RS.astype('intc')
+        self.ZS = ZS = np.empty_like(self.WS, dtype=np.intc)
+
+        # TODO: check if initializing xs as zeros or random is better
+        self.XS = XS = np.empty_like(self.WS, dtype=np.intc)
+        #self.XS = XS = np.random.binomial(np.ones(self.WS.shape[0], dtype=np.intc), .5) # indicator for background
+        #self.XS = XS = np.zeros(self.WS.shape[0], dtype=np.intc) # indicator for background
+        #XS = XS.astype('intc')
+        #self.XS = XS
+
+
+        self.LS = LS = ls
+
+        np.testing.assert_equal(N, len(WS))
+
+        for i in range(N):
+            w, d, = WS[i], DS[i]
+            c = CS[d]
+            rr = RS[d]
+
+            x_new = i % 2
+            XS[i] = x_new
+
+            z_new = i % n_topics
+            ZS[i] = z_new
+
+            ndz_[d, z_new] += 1
+            nx_[x_new, c,rr, z_new] += 1
+
+            if x_new == 0:
+                nzw_[z_new, w] += 1
+                nz_[z_new] += 1
+            elif x_new ==1:
+                nzwcr_[z_new, w, c, rr] += 1
+                nzcr_[z_new, c, rr] += 1
+
+
+        print("Finished initializing")
+        self.loglikelihoods_ = []
+
+
     def _initializeLs(self, ls):
             n_topics = self.n_topics
             n_regions = self.n_regions
@@ -676,6 +869,52 @@ class LDA:
         beta = self.beta
         nd = np.sum(ndz, axis=1).astype(np.intc)
         return _lda._loglikelihood(nzw, ndz, nz, nd, alpha, beta)
+
+    def loglikelihood_complete(self):
+        """Calculate complete log likelihood, log p(w,z,x)
+
+        Formula used is log p(w,z) = log p(w|z) + log p(z)
+        """
+
+        self.components_ = (self.nzw_ + self.beta).astype(float)
+        self.components_ /= np.sum(self.components_, axis=1)[:, np.newaxis]
+        self.topic_word_ = self.components_
+        self.doc_topic_ = (self.ndz_ + self.alpha).astype(float)
+        self.doc_topic_ /= np.sum(self.doc_topic_, axis=1)[:, np.newaxis]
+
+        # word distributions for individual collections
+        self.topic_word_collection_ = (self.nzwcr_ + self.delta).astype(float)
+        self.topic_word_collection_ /= np.sum(self.topic_word_collection_, axis=1)[:, np.newaxis, :]
+
+
+        # indicator distributions
+        self.indicator_word_collection_region_ = (self.nx_ + self.gamma_0)
+        self.indicator_word_collection_region_ /= np.sum(self.indicator_word_collection_region_, axis=3)[:, :, :, np.newaxis]
+
+        likelihood = 0
+
+        prevDoc = self.DS[0]
+        docLikelihood = 0
+        for i in range(self.ndz_.shape[0]):
+            w = self.WS[i]
+            d = self.DS[i]
+            z = self.ZS[i]
+            c = self.CS[d]
+            x = self.XS[i]
+            rr = self.RS[d]
+
+
+            if prevDoc == d:
+                if x == 0:
+                    docLikelihood += np.log(self.doc_topic_[d, z] * self.topic_word_[z, w])
+                else:
+                    docLikelihood += np.log(self.doc_topic_[d, z] * self.topic_word_collection_[z, w, c, rr])
+            else:
+                likelihood += docLikelihood
+                docLikelihood = 0
+                prevDoc = d
+
+        return likelihood
 
     """def _sample_topics(self, rands):
         Samples all topic assignments. Called once per iteration.
@@ -739,5 +978,20 @@ class LDA:
         gamma = np.repeat(self.gamma_0, 3).astype(np.float64)
 
         _lda._sample_topics_complete(self.WS, self.DS, self.ZS, self.CS, self.XS, self.RS, self.LS,
-         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwc_, self.nzc_, self.nzwr_,
-         self.nzr_, alpha, beta, delta, gamma, rands)
+         self.nx_, self.nzw_, self.ndz_, self.nz_, self.nzwcr_, self.nzcr_, alpha, beta, delta, gamma, rands)
+
+    def _sample_topics_fluid(self, rands):
+        """Samples all topic assignments. Called once per iteration.
+
+        Calls Cython routine for speed
+        """
+
+        n_topics, vocab_size = self.nzw_.shape
+
+        alpha = np.repeat(self.alpha, n_topics).astype(np.float64)
+        beta = np.repeat(self.beta, vocab_size).astype(np.float64)
+        delta = np.repeat(self.delta, vocab_size).astype(np.float64) # for cross collection
+
+
+        _lda._sample_topics_fluid(self.WS, self.DS, self.ZS, self.CS, self.XS, self.reg_assign, self.ind_reg_assign, self.nzwcr_,
+         self.nzcr_, self.nx_, self.nzw_, self.ndz_, self.nz_, alpha, beta, delta, self.gamma_0, rands)

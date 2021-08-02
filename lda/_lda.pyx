@@ -16,10 +16,9 @@ from libc.math cimport abs as cabs
 
 M_PI = 3.14159265358979323846
 
-from   scipy.special import gammaln
+from scipy.special import gammaln
 
-
-def pdf(x, mean, shape, df):
+'''def pdf(x, mean, shape, df):
     return 1000000 * np.exp(logpdf(x, mean, shape, df))
 
 
@@ -41,6 +40,7 @@ def logpdf(x, mean, shape, df):
     E = -t * np.log(1 + (1./df) * maha)
 
     return A - B - C - D + E
+    '''
 
 cdef extern from "gamma.h":
     cdef double lda_lgamma(double x) nogil
@@ -71,9 +71,156 @@ cdef int searchsorted(double* arr, int length, double value) nogil:
             imax = imid
     return imin
 
+def _sample_topics_fluid(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:, :] reg_assign, int[:]ind_reg_assign, int[:, :, :, :] nzwcr,
+                  int[:, :, :]nzcr, int[:, :, :] nx, int[:, :] nzw,
+                  int[:, :] ndz, int[:] nz, double[:] alpha, double[:] beta, double[:] delta,
+                  double gamma, double[:] rands):
+    cdef int i, j, k, w, d, c, z, z_new, x, x_new, rr
+    cdef double r
+    cdef int N = WS.shape[0]
+    cdef int n_rand = rands.shape[0]
+    cdef int n_topics = nz.shape[0]
+
+    cdef double dist_cum
+    cdef double dist_cum_x = 0
+
+    cdef double beta_sum = 0
+    cdef double delta_sum = 0
+    cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
+    cdef double* dist_sum_x = <double*> malloc(2 * sizeof(double))
+
+
+    cdef int[:] RS
+
+    '''
+    cdef int[:] chinRs = reg_assign[0]
+    cdef int[:] italRs = reg_assign[1]
+    cdef int[:] mexiRs = reg_assign[2]
+
+
+    cdef int[:, :, :] nzwr
+    cdef int[:, :] nzr
+    cdef int[:, :, :] chinNzwr = nzwrs[0]
+    cdef int[:, :, :] italNzwr = nzwrs[1]
+    cdef int[:, :, :] mexiNzwr = nzwrs[2]
+    cdef int[:, :] chinNzr = nzrs[0]
+    cdef int[:, :] italNzr  = nzrs[1]
+    cdef int[:, :] mexiNzr  = nzrs[2]
+    '''
+
+
+    if dist_sum is NULL:
+        raise MemoryError("Could not allocate memory during sampling.")
+
+    with nogil:
+
+        # first equation
+        for i in range(beta.shape[0]):
+            beta_sum += beta[i]
+
+        # second equation for when x = 1
+        for i in range(delta.shape[0]):
+            delta_sum += delta[i]
+
+        # gibbs sampling for topics and indicator variables
+        for i in range(N):
+            w = WS[i]
+            d = DS[i]
+            z = ZS[i]
+            x = XS[i]
+            c = CS[d]
+
+            RS = reg_assign[c]
+
+            '''
+            if c == 0:
+                RS = chinRs
+                nzwr = chinNzwr
+                nzr = chinNzr
+            elif c == 1:
+                RS = italRs
+                nzwr = italNzwr
+                nzr = italNzr
+            else:
+                RS = mexiRs
+                nzwr = mexiNzwr
+                nzr = mexiNzr
+                '''
+
+
+            j = ind_reg_assign[d]
+            rr = RS[j]
+
+            dec(nx[x, c, z])
+            dec(ndz[d, z])
+
+            if x == 0:
+                dec(nzw[z, w])
+                dec(nz[z])
+            else:
+                dec(nzwcr[z, w, c, rr])
+                dec(nzcr[z, c, rr])
+
+            if nzwcr[z, w, c, rr] < 0:
+                printf("bad - z:%d w:%d c:%d rr:%d \n", z, w, c, rr)
+
+
+            dist_cum_x = (nx[0,c, z] + gamma)* (nzw[z,w] + beta[w]) / (nz[z] + beta_sum)
+            dist_sum_x[0] = dist_cum_x
+
+            dist_cum_x += (nx[1,c, z] + gamma) * (nzwcr[z, w, c, rr] + delta[w]) / (nzcr[z, c, rr] + delta_sum)
+            dist_sum_x[1] = dist_cum_x
+
+            r = rands[i % n_rand] * dist_cum_x
+
+            #printf("%d\nindex for rand, i:", i % n_rand)
+
+            #x_new = searchsorted(dist_sum_x, 2, r)
+
+
+            if r < dist_sum_x[0]:
+                x_new = 0
+            else:
+                x_new = 1
+
+
+            dist_cum = 0
+            if x_new == 0:
+                for k in range(n_topics):
+                    # beta is a double so cdivision yields a double
+                    dist_cum += ((nzw[k, w] + beta[w]) / (nz[k] + beta_sum) * (ndz[d, k] + alpha[k]))
+                    dist_sum[k] = dist_cum
+
+                r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
+                z_new = searchsorted(dist_sum, n_topics, r)
+            else:
+                for k in range(n_topics):
+                    # beta is a double so cdivision yields a double
+                    dist_cum += ((nzwcr[z, w, c, rr]+ delta[w]) / (nzcr[z, c, rr]+ delta_sum)) * (ndz[d, k] + alpha[k])
+                    dist_sum[k] = dist_cum
+                r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
+                z_new = searchsorted(dist_sum, n_topics, r)
+
+
+            if x_new == 0:
+                inc(nzw[z_new, w])
+                inc(nz[z_new])
+            else:
+                inc(nzwcr[z_new, w, c, rr])
+                inc(nzcr[z_new, c, rr])
+
+
+            inc(nx[x_new, c, z_new])
+            inc(ndz[d, z_new])
+
+            ZS[i] = z_new
+            XS[i] = x_new
+
+        free(dist_sum)
+        free(dist_sum_x)
+
 def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:] RS, double[:, :] LS, int[:, :, :, :] nx,int[:, :] nzw,
-                  int[:, :] ndz, int[:] nz, int[:, :, :] nzwc, int[:, :] nzc, int[:, :, :] nzwr, int[:, :] nzr,
-                  double[:] alpha, double[:] beta, double[:] delta,
+                  int[:, :] ndz, int[:] nz, int[:, :, :, :] nzwcr, int[:, :, :] nzcr, double[:] alpha, double[:] beta, double[:] delta,
                   double[:] gamma, double[:] rands):
     cdef int i, k, w, d, c, z, z_new, x, x_new, rr, r_new
     cdef double r
@@ -87,14 +234,11 @@ def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] X
     cdef double beta_sum = 0
     cdef double delta_sum = 0
     cdef double* dist_sum = <double*> malloc(n_topics * sizeof(double))
-    cdef double* dist_sum_x = <double*> malloc(3 * sizeof(double))
+    cdef double* dist_sum_x = <double*> malloc(2 * sizeof(double))
 
 
     if dist_sum is NULL:
         raise MemoryError("Could not allocate memory during sampling.")
-
-
-    #print("\n" + str(inv_RS))
 
     with nogil:
 
@@ -122,23 +266,15 @@ def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] X
                 dec(nzw[z, w])
                 dec(nz[z])
             elif x == 1:
-                dec(nzwc[z, w, c])
-                dec(nzc[z, c])
-            else:
-                dec(nzwr[z, w, rr])
-                dec(nzr[z, rr])
+                dec(nzwcr[z, w, c, rr])
+                dec(nzcr[z, c, rr])
 
 
             dist_cum_x = (nx[0,c, rr, z] + gamma[w])* (nzw[z,w] + beta[w]) / (nz[z] + beta_sum)
             dist_sum_x[0] = dist_cum_x
 
-            dist_cum_x += (nx[1,c, rr, z] + gamma[w]) * (nzwc[z,w,c] + delta[w]) / (nzc[z,c] + delta_sum)
+            dist_cum_x += (nx[1,c, rr, z] + gamma[w]) * (nzwcr[z,w,c, rr] + delta[w]) / (nzcr[z,c, rr] + delta_sum)
             dist_sum_x[1] = dist_cum_x
-
-            dist_cum_x += (nx[2,c,rr, z] + gamma[w]) * (nzwr[z,w,rr] + delta[w]) / (nzr[z, rr] + delta_sum)
-            dist_sum_x[2] = dist_cum_x
-
-
 
             r = rands[i % n_rand] * dist_cum_x
 
@@ -149,10 +285,9 @@ def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] X
 
             if r < dist_sum_x[0]:
                 x_new = 0
-            elif r < dist_sum_x[1]:
-                x_new = 1
             else:
-                x_new = 2
+                x_new = 1
+
 
             dist_cum = 0
             if x_new == 0:
@@ -163,17 +298,10 @@ def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] X
 
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
                 z_new = searchsorted(dist_sum, n_topics, r)
-            elif x_new == 1:
-                for k in range(n_topics):
-                    # beta is a double so cdivision yields a double
-                    dist_cum += ((nzwc[k, w, c] + delta[w]) / (nzc[k, c] + delta_sum)) * (ndz[d, k] + alpha[k])
-                    dist_sum[k] = dist_cum
-                r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
-                z_new = searchsorted(dist_sum, n_topics, r)
             else:
                 for k in range(n_topics):
                     # beta is a double so cdivision yields a double
-                    dist_cum += ((nzwr[k, w, rr] + delta[w]) / (nzr[k, rr] + delta_sum)) * (ndz[d, k] + alpha[k])
+                    dist_cum += ((nzwcr[k, w, c, rr] + delta[w]) / (nzcr[k, c, rr] + delta_sum)) * (ndz[d, k] + alpha[k])
                     dist_sum[k] = dist_cum
                 r = rands[i % n_rand] * dist_cum  # dist_cum == dist_sum[-1]
                 z_new = searchsorted(dist_sum, n_topics, r)
@@ -182,12 +310,9 @@ def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] X
             if x_new == 0:
                 inc(nzw[z_new, w])
                 inc(nz[z_new])
-            elif x_new == 1:
-                inc(nzwc[z_new, w, c])
-                inc(nzc[z_new, c])
             else:
-                inc(nzwr[z_new, w, rr])
-                inc(nzr[z_new, rr])
+                inc(nzwcr[z_new, w, c, rr])
+                inc(nzcr[z_new, c, rr])
 
 
             inc(nx[x_new, c, rr, z_new])
@@ -196,10 +321,8 @@ def _sample_topics_complete(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] X
             ZS[i] = z_new
             XS[i] = x_new
 
-
         free(dist_sum)
         free(dist_sum_x)
-
 
 '''
 def _update_covariance(L, x, n):
@@ -246,6 +369,7 @@ cdef cholupdate(np.ndarray[FLOAT_t, ndim=2] R, np.ndarray[FLOAT_t, ndim=1] x):
             R[<unsigned int>k,<unsigned int>i] = (R[<unsigned int>k,<unsigned int>i] + s*x[<unsigned int>i]) / c
             x[<unsigned int>i] = c * x[<unsigned int>i] - s * R[<unsigned int>k,<unsigned int>i]
 
+'''
 '''
 def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] Delta, double[:] rands,
         double lambda_0, double[:, :] S_0, double[:] mu_0, double v_0):
@@ -316,9 +440,7 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
             S_N = S_0 + C + (lambda_0 * N_/(lambda_0+ N_)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
             S_N1 = S_0 + C + (lambda_0 * N_/(lambda_0+ N_-1)) * (y_bar - mu_0).dot((y_bar - mu_0).T)
 
-            '''
-
-            prob = pow(M_PI, -2/2)*pow((lambda_0+N_)/(lambda_0+N_-1), -2/2)*pow(np.linalg.det(S_N), -(v_0+N_)/2)/pow(np.linalg.det(S_N1), -(v_0+N_-1)/2)*exp(lgamma((v_0 + N_)/2))/exp(lgamma((v_0 + N_ -2)/2)) '''
+            prob = pow(M_PI, -2/2)*pow((lambda_0+N_)/(lambda_0+N_-1), -2/2)*pow(np.linalg.det(S_N), -(v_0+N_)/2)/pow(np.linalg.det(S_N1), -(v_0+N_-1)/2)*exp(lgamma((v_0 + N_)/2))/exp(lgamma((v_0 + N_ -2)/2))
 
             #_update_covariance(L_0, , N_)
 
@@ -358,9 +480,10 @@ def _sample_Ls(int[:] RS, double[:, :] LS, int[:, :] ndr, int[:] nr, double[:] D
         RS[d] = rr_new
 
     #free(dist_sum_r)
+'''
 
 def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:, :, :] nx, int[:, :] nzw,
-                  int[:, :] ndz, int[:] nz, int[:, :, :] nzwc, int[:, :] nzc,  double[:] alpha, double[:] beta, double[:] delta,
+                  int[:, :] ndz, int[:] nz, int[:, :, :] nzwc, int[:, :] nzc, double[:] alpha, double[:] beta, double[:] delta,
                   double gamma_0, double gamma_1, double[:] rands):
     cdef int i, k, w, d, c, z, z_new, x, x_new
     cdef int N = WS.shape[0]
@@ -419,7 +542,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
 
             #printf("%d\nindex for rand, i:", i % n_rand)
 
-            #x_new = searchsorted(dist_sum_x, 2, r)
+            x_new = searchsorted(dist_sum_x, 2, r)
 
             if r < dist_sum_x[0]:
                 x_new = 0
@@ -454,7 +577,7 @@ def _sample_topics(int[:] WS, int[:] DS, int[:] ZS, int[:] CS, int[:] XS, int[:,
                 inc(nzwc[z_new, w, c])
                 inc(nzc[z_new, c])
 
-            inc(nx[x, c, z_new])
+            inc(nx[x_new, c, z_new])
             inc(ndz[d, z_new])
 
             ZS[i] = z_new
