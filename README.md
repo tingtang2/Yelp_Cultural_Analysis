@@ -1,14 +1,31 @@
-# c3rLDA - Cross Collection Cross Regional Latent Dirichlet Allocation
+## c3rLDA - Cross Collection Cross Regional Latent Dirichlet Allocation
 
+a topic modeling package written for our paper: 
 
-# Installation
-...
+Key utilities written in Cython for simple but fast computations
 
-# Preprocessing the data
-...
+### Installation
 
+To Cythonize:
+```bash
 
-# Running the topic model
-...
+python3 setup.py --inplace
 
-# Running the coherence metrics
+```
+
+### Preprocessing the data
+
+```bash
+
+python3 preprocess_Yelp_dataset.py
+
+```
+
+### Running the topic model
+```bash
+
+python3 run.py
+
+```
+
+### Running the coherence metrics
