@@ -4,6 +4,10 @@
 # Installation
 ...
 
+# Preprocessing the data
+...
+
+
 # Running the topic model
 ...
 
