@@ -1,4 +1,4 @@
-import lda
+import c3rlda
 from scipy import sparse
 import numpy as np
 import sklearn
@@ -86,7 +86,7 @@ if __name__ == '__main__':
     indicies_locs_eth = np.array(indicies_locs_eth, dtype=np.intc) # placement in region index for each loc 
     
     # run model 
-    model = lda.LDA(n_topics=num_topics, region_assignments=reg_assign_mat, n_regions_fluid = n_regions,
+    model = c3rlda.c3rLDA(n_topics=num_topics, region_assignments=reg_assign_mat, n_regions_fluid = n_regions,
                     indices_region_assignments=indicies_locs_eth, n_iter=1000)
     model.fit_fluid(X_train.astype(np.intc), cc.astype(np.intc), locs)
 

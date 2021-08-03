@@ -4,6 +4,8 @@ a topic modeling package written for our paper:
 
 Key utilities written in Cython for simple but fast computations
 
+Code is adapted and heavily inspired by the lda PyPi library as well as Michael Paul's ccLDA implementation
+
 ### Installation
 
 To Cythonize:

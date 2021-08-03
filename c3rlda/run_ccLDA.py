@@ -1,4 +1,4 @@
-import lda
+import c3rlda
 from scipy import sparse
 import numpy as np
 
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     cc= cc[ix]
 
     # run model 
-    model = lda.LDA(n_topics=num_topics, n_iter=1000)
+    model = c3rlda.c3rLDA(n_topics=num_topics, n_iter=1000)
     model.fit(X_train.astype(np.intc), cc.astype(np.intc))
 
     # save big matricies

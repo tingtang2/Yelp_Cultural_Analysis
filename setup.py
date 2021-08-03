@@ -1,8 +1,8 @@
 from setuptools import setup, Extension
 from Cython.Build import cythonize
 
-exts = Extension(name = "_lda", 
-                 sources = [".c3rlda/_lda.pyx", ".c3rlda/gamma.c"])
+exts = Extension(name = "_c3rlda", 
+                 sources = [".c3rlda/_c3rlda.pyx", ".c3rlda/gamma.c"])
 
 setup(
     name = "sampling_tools",
