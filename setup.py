@@ -2,7 +2,7 @@ from setuptools import setup, Extension
 from Cython.Build import cythonize
 
 exts = Extension(name = "_lda", 
-                 sources = ["./lda/_lda.pyx", "./lda/gamma.c"])
+                 sources = [".c3rlda/_lda.pyx", ".c3rlda/gamma.c"])
 
 setup(
     name = "sampling_tools",
