@@ -11,8 +11,7 @@ from scipy import sparse
 if __name__ == '__main__':
     
     my_parser = argparse.ArgumentParser(description='Get threshold number for min number of documents token must be present in')
-    my_parser.add_argument('-below', type=int, dest='below', default=5, help = "threshold for min # of docs from preprocessing")
-    
+    my_parser.add_argument('-below', type=int, dest='below', default=5, help = "threshold for min # of docs from preprocessing")   
     args = my_parser.parse_args()
     print(f"Threshold: {args.below}")
     
@@ -30,7 +29,8 @@ if __name__ == '__main__':
         locs = json.load(infile)
         
     print("loaded data")
-    # convert to bow
+   
+   # convert to bow
     
     big_bows = []
 

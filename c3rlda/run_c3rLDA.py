@@ -12,12 +12,12 @@ import argparse
 
 
 if __name__ == '__main__':
-    num_topics = 25
-    
     my_parser = argparse.ArgumentParser(description='Get threshold number for min number of documents token must be present in')
     my_parser.add_argument('-below', type=int, dest='below', default=5, help = "threshold for min # of docs from preprocessing")
+    my_parser.add_argument('-num_topics', type=int, dest='num_topics', default=25, help = "Number of topics for topic model")
     
     args = my_parser.parse_args()
+    num_topics = args.num_topics
     print(f"Threshold: {args.below}")
     
     # get training data
