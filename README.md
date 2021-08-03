@@ -26,8 +26,13 @@ python3 preprocess_Yelp_dataset.py
 ### Running the topic model
 ```bash
 
-python3 run.py
+python3 run_{}.py
 
 ```
 
 ### Running the coherence metrics
+```bash
+
+python3 calc_palmetto_{}.py
+
+```
