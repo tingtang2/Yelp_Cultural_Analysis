@@ -69,13 +69,12 @@ with open('all_eths.txt', 'r') as infile:
     all_eths = infile.read().split('\n')
 
 
-
 ## get stuff from json dump
 
-restaurant_reviews = []
+#restaurant_reviews = []
 
-with open('restaurant_reviews.json', 'r') as file:
-    restaurant_reviews = json.load(file)
+#with open('restaurant_reviews.json', 'r') as file:
+#    restaurant_reviews = json.load(file)
 
 
 
@@ -118,10 +117,10 @@ with open('all_eths_reviews.json', 'w',encoding='utf-8') as outfile:
 #####################################################################################
 
 
-all_eth_reviews = {}
+#all_eth_reviews = {}
 
-with open('all_eths_reviews.json', 'r') as file:
-    all_eth_reviews = json.load(file)
+#with open('all_eths_reviews.json', 'r') as file:
+#    all_eth_reviews = json.load(file)
 
 
 # down sample
@@ -141,16 +140,16 @@ del all_eth_reviews['Ethnic Food']
 del all_eth_reviews['Asian Fusion']
 del all_eth_reviews['Halal']
 del all_eth_reviews['New Mexican Cuisine']
-del all_eth_reviews['American (New)']
-del all_eth_reviews['American (Traditional)']
+#del all_eth_reviews['American (New)']
+#del all_eth_reviews['American (Traditional)']
 del all_eth_reviews['Irish']
 del all_eth_reviews['Cantonese']
 
 for key, value in all_eth_reviews.items():
     print(key + str(':'), len(value))
 
-with open('all_eths_minus_american_keys.json', 'w',encoding='utf-8') as outfile:
-    json.dump(list(all_eth_reviews.keys()), outfile, ensure_ascii=False, indent=4)
+#with open('all_eths_minus_american_keys.json', 'w',encoding='utf-8') as outfile:
+#    json.dump(list(all_eth_reviews.keys()), outfile, ensure_ascii=False, indent=4)
 
 
 # Get locations for each review
@@ -175,26 +174,16 @@ for key, value in all_eth_reviews.items():
         bus_id = review['business_id']
         locations.append(bus_table[bus_id])
 
-
-
 locs = np.array(locations)
 
 
-
-with open('locs_unshuffles.json', 'w',encoding='utf-8') as outfile:
+with open('locs_all_eths_less_than_15000.json', 'w',encoding='utf-8') as outfile:
     json.dump(locations, outfile, ensure_ascii=False, indent=4)
 
+#locs = []
 
-
-with open('locs_all_eths_minus_american.json', 'w',encoding='utf-8') as outfile:
-    json.dump(locations, outfile, ensure_ascii=False, indent=4)
-
-
-
-locs = []
-
-with open('locs_all_eths_minus_american.json', 'r') as infile:
-    locs = json.load(infile)
+#with open('locs_all_eths_minus_american.json', 'r') as infile:
+#    locs = json.load(infile)
 
 
 # ## 2. Preprocess
@@ -239,21 +228,15 @@ for lexicon in lexicons.values():
 
 
 
-big_lexicon = corpora.Dictionary.load("big_lexicon_n_20_removed_all_eths_may_2021")
-
+#big_lexicon = corpora.Dictionary.load("big_lexicon_n_20_removed_all_eths_may_2021")
 
 
 big_lexicon.filter_n_most_frequent(20)
 
 
-
-big_lexicon.save("big_lexicon_n_20_removed_all_eths_may_2021")
-
+#big_lexicon.save("big_lexicon_n_20_removed_all_eths_may_2021")
 
 
 big_lexicon.filter_extremes(no_below=2, no_above=1.0, keep_n=None)
-
-
-
 big_lexicon.save("big_lexicon_n_20_removed_all_eths_no_below_2")
 

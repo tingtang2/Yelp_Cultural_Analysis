@@ -12,6 +12,8 @@ if __name__ == '__main__':
     
     my_parser = argparse.ArgumentParser(description='Get threshold number for min number of documents token must be present in')
     my_parser.add_argument('-below', type=int, dest='below', default=5, help = "threshold for min # of docs from preprocessing")   
+    # TODO: Fix paths everywhere
+    my_parser.add_argument('-path', type=string, dest='below', default="~/", help = "path for loading and saving")   
     args = my_parser.parse_args()
     print(f"Threshold: {args.below}")
     
