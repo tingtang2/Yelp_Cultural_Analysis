@@ -17,13 +17,18 @@ python3 setup.py build_ext -b c3rlda/
 
 ### Preprocessing the data
 
+Please download the dataset from [the Yelp Open Dataset website](https://www.yelp.com/dataset "Yelp Open Dataset").
+
+Of those files, we use `yelp_academic_dataset_review.json` and `yelp_academic_dataset_business.json`.
+
+To filter the dataset: 
 ```bash
 
 python3 preprocess_Yelp_dataset.py
 
 ```
 
-
+To tokenize: 
 ```bash
 
 python3 preprocess_data.py -below 5
